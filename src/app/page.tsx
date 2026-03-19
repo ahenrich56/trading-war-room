@@ -141,7 +141,7 @@ export default function WarRoomDashboard() {
             placeholder="TICKER" 
             className="w-24 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold"
           />
-          <Select value={timeframe} onValueChange={setTimeframe}>
+          <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
             <SelectTrigger className="w-24 bg-black/50 border-white/20">
               <SelectValue placeholder="TF" />
             </SelectTrigger>
@@ -151,7 +151,7 @@ export default function WarRoomDashboard() {
               <SelectItem value="15m">15m</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={riskProfile} onValueChange={setRiskProfile}>
+          <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
             <SelectTrigger className="w-32 bg-black/50 border-white/20">
               <SelectValue placeholder="Risk" />
             </SelectTrigger>

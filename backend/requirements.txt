@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+requests
+openai
+python-dotenv
+pandas
+ta

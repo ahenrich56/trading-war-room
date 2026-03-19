@@ -1,0 +1,2 @@
+﻿Preview URL: https://skill-deploy-lu86kk4om1-agent-skill-vercel.vercel.app
+Claim URL:   https://vercel.com/claim-deployment?code=734c5008-ac97-4220-bc9b-12025abb28e5

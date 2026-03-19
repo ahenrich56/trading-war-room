@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
-import { spawn } from "child_process";
-import path from "path";
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 180; // 3 minutes max
+export const maxDuration = 300; // 5 minutes max for intense multi-agent LLM reasoning
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,52 +15,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Determine the path to the Python script
-    const scriptPath = path.join(process.cwd(), "engine", "analyze.py");
+    // Proxy the request to the live FastAPI backend
+    // Use an environment variable for the VPS IP, default to localhost for local testing
+    const FASTAPI_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-    const encoder = new TextEncoder();
-
-    const stream = new ReadableStream({
-      start(controller) {
-        // Spawn the python process
-        // In a real environment, you might need to point this to a specific python executable
-        // e.g., representing the 'tradingagents' conda env if the real repo was used.
-        const pythonProcess = spawn("python", [
-          scriptPath,
-          "--ticker", ticker,
-          "--timeframe", timeframe,
-          "--risk_profile", riskProfile
-        ]);
-
-        pythonProcess.stdout.on("data", (data) => {
-          // The data can be a chunk containing multiple lines
-          const lines = data.toString().split("\n");
-          for (const line of lines) {
-            if (line.trim()) {
-              // Write each line as a standard Server-Sent Event
-              controller.enqueue(encoder.encode(`data: ${line}\n\n`));
-            }
-          }
-        });
-
-        pythonProcess.stderr.on("data", (data) => {
-          console.error(`Python Error: ${data.toString()}`);
-        });
-
-        pythonProcess.on("close", (code) => {
-          console.log(`Python process exited with code ${code}`);
-          controller.close();
-        });
-
-        pythonProcess.on("error", (err) => {
-          console.error("Failed to start subprocess.", err);
-          controller.enqueue(encoder.encode(`data: [ERROR] {"text": "Process failed: ${err.message}"}\n\n`));
-          controller.close();
-        });
-      }
+    const response = await fetch(`${FASTAPI_URL}/api/v1/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ticker,
+        timeframe,
+        riskProfile,
+      }),
     });
 
-    return new Response(stream, {
+    if (!response.ok || !response.body) {
+      const errorText = await response.text();
+      throw new Error(`FastAPI Error: ${response.status} - ${errorText}`);
+    }
+
+    // Return the readable stream directly to the client as an SSE endpoint
+    return new Response(response.body, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
@@ -70,11 +45,24 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (err) {
-    console.error("API Route Error:", err);
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
+  } catch (err: any) {
+    console.error("API Route Proxy Error:", err);
+    
+    // Fallback error stream so the frontend doesn't crash on connection failure
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: [ERROR] {"text": "Proxy connection failed: ${err.message}"}\n\n`));
+        controller.close();
+      }
+    });
+    
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+      },
     });
   }
 }
