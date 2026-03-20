@@ -1113,8 +1113,8 @@ async def watchlist_scan(request: WatchlistRequest):
 
 CONSENSUS_MODELS = [
     "gpt-4o-mini",
-    "claude-3-5-haiku-20241022",
-    "gemini-2.0-flash",
+    "deepseek/r1:free",
+    "qwen/qwen3-coder:free",
 ]
 
 async def ask_model(model: str, prompt: str) -> dict:
