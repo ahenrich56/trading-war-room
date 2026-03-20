@@ -583,11 +583,171 @@ Output ONLY valid JSON, no markdown:
                 "tv_alert": f"TICKER={ticker};TF={tf};SIG=NO_TRADE;CONF=0;"
             }
 
+        # Store signal in history and send Telegram alert
+        await store_signal(signal_data)
+        await send_telegram_alert(signal_data)
+
         yield emit("SIGNAL_ENGINE", signal_data)
 
     except Exception as e:
         yield emit("ERROR", {"text": f"Backend stream failed: {str(e)}"})
 
+
+# ═══════════════════════════════════════════════════════════
+#  SIGNAL HISTORY (In-memory, last 50 signals)
+# ═══════════════════════════════════════════════════════════
+
+signal_history: list[dict] = []
+MAX_HISTORY = 50
+
+async def store_signal(signal_data: dict):
+    """Store a signal in the history buffer."""
+    global signal_history
+    signal_history.insert(0, signal_data)
+    if len(signal_history) > MAX_HISTORY:
+        signal_history = signal_history[:MAX_HISTORY]
+
+
+# ═══════════════════════════════════════════════════════════
+#  TELEGRAM BOT ALERTS
+# ═══════════════════════════════════════════════════════════
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+async def send_telegram_alert(signal_data: dict):
+    """Send a formatted signal alert to Telegram."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return  # Telegram not configured, silently skip
+
+    try:
+        sig = signal_data.get("signal", "UNKNOWN")
+        ticker = signal_data.get("ticker", "???")
+        tf = signal_data.get("timeframe", "?")
+        confidence = signal_data.get("confidence", 0)
+        entry = signal_data.get("entry_zone", {})
+        sl = signal_data.get("stop_loss", 0)
+        tps = signal_data.get("take_profit", [])
+        rr = signal_data.get("risk_reward", 0)
+        reasons = signal_data.get("reasons", [])
+        regime = signal_data.get("market_regime", "unknown")
+
+        emoji = "🟢" if sig == "LONG" else "🔴" if sig == "SHORT" else "⚪"
+        
+        tp_lines = ""
+        for tp in tps:
+            tp_lines += f"  TP{tp.get('level', '?')}: {tp.get('price', 0)}\n"
+
+        reason_lines = "\n".join(f"  • {r}" for r in reasons[:3])
+
+        message = (
+            f"{emoji} *WAR ROOM SIGNAL*\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"*{sig}* `{ticker}` on `{tf}`\n"
+            f"Regime: `{regime}`\n\n"
+            f"📍 *Entry:* `{entry.get('min', 0)} - {entry.get('max', 0)}`\n"
+            f"🛑 *Stop:* `{sl}`\n"
+            f"🎯 *Targets:*\n{tp_lines}\n"
+            f"📊 R:R `{rr}` | Conf `{confidence}%`\n\n"
+            f"💡 *Rationale:*\n{reason_lines}\n\n"
+            f"🕐 {datetime.utcnow().strftime('%H:%M UTC')}"
+        )
+
+        import httpx
+        async with httpx.AsyncClient() as hclient:
+            await hclient.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True,
+                },
+                timeout=5,
+            )
+    except Exception as e:
+        print(f"Telegram alert failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════
+#  CHART DATA ENDPOINT (for TradingView Lightweight Charts)
+# ═══════════════════════════════════════════════════════════
+
+class ChartRequest(BaseModel):
+    ticker: str
+    timeframe: str
+
+@app.post("/api/v1/chart-data")
+async def chart_data_endpoint(request: ChartRequest):
+    """Return OHLCV data + indicator overlays for TradingView Lightweight Charts."""
+    ticker = request.ticker.upper()
+    yf_symbol = resolve_ticker(ticker)
+
+    tf_map = {
+        "1m": ("1m", "1d"), "2m": ("2m", "5d"), "5m": ("5m", "5d"),
+        "15m": ("15m", "5d"), "1h": ("1h", "30d"), "4h": ("1h", "30d"),
+    }
+    interval, period = tf_map.get(request.timeframe, ("5m", "5d"))
+
+    try:
+        tk = yf.Ticker(yf_symbol)
+        df = tk.history(period=period, interval=interval)
+
+        if df.empty:
+            return {"error": "No data", "candles": [], "indicators": {}}
+
+        # Build candles array for TradingView
+        candles = []
+        for idx, row in df.iterrows():
+            candles.append({
+                "time": int(idx.timestamp()),
+                "open": round(float(row["Open"]), 2),
+                "high": round(float(row["High"]), 2),
+                "low": round(float(row["Low"]), 2),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]),
+            })
+
+        # Compute indicator overlays
+        close = df["Close"]
+        high = df["High"]
+        low = df["Low"]
+        volume = df["Volume"]
+
+        ema9 = _ema(close, 9)
+        ema21 = _ema(close, 21)
+        vwap_series = ((high + low + close) / 3 * volume).cumsum() / volume.cumsum()
+
+        # Build overlay arrays
+        ema9_data = [{"time": int(idx.timestamp()), "value": round(float(v), 2)}
+                     for idx, v in ema9.items() if not pd.isna(v)]
+        ema21_data = [{"time": int(idx.timestamp()), "value": round(float(v), 2)}
+                      for idx, v in ema21.items() if not pd.isna(v)]
+        vwap_data = [{"time": int(idx.timestamp()), "value": round(float(v), 2)}
+                     for idx, v in vwap_series.items() if not pd.isna(v)]
+
+        # BB bands
+        bb = _bollinger(close)
+
+        return {
+            "candles": candles,
+            "indicators": {
+                "ema9": ema9_data,
+                "ema21": ema21_data,
+                "vwap": vwap_data,
+                "bb": bb,
+            },
+            "ticker": ticker,
+            "symbol": yf_symbol,
+        }
+
+    except Exception as e:
+        return {"error": str(e), "candles": [], "indicators": {}}
+
+
+# ═══════════════════════════════════════════════════════════
+#  API ENDPOINTS
+# ═══════════════════════════════════════════════════════════
 
 @app.post("/api/v1/analyze")
 async def analyze_endpoint(request: AnalysisRequest):
@@ -596,6 +756,12 @@ async def analyze_endpoint(request: AnalysisRequest):
         media_type="text/event-stream"
     )
 
+@app.get("/api/v1/signals")
+async def get_signal_history(limit: int = 20):
+    """Return recent signal history."""
+    return {"signals": signal_history[:limit], "total": len(signal_history)}
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "war-room-ai", "version": "2.0-sprint1"}
+    return {"status": "ok", "service": "war-room-ai", "version": "3.0-sprint2"}
+

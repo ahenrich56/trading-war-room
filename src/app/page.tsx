@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-// Define the signal payload structure
+// Signal payload
 interface SignalPayload {
   ticker: string;
   timeframe: string;
@@ -21,6 +21,9 @@ interface SignalPayload {
   position_size_pct: number;
   reasons: string[];
   tv_alert: string;
+  market_regime?: string;
+  timestamp_utc?: string;
+  indicators_used?: Record<string, number | null>;
 }
 
 const ALL_STAGES = [
@@ -47,6 +50,42 @@ export default function WarRoomDashboard() {
   const [agentData, setAgentData] = useState<Record<string, any>>({});
   const [signal, setSignal] = useState<SignalPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Chart + History state
+  const [chartData, setChartData] = useState<any>(null);
+  const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
+  const [activeTab, setActiveTab] = useState<"chart" | "history">("chart");
+
+  // Load chart data
+  const loadChartData = useCallback(async (t: string, tf: string) => {
+    try {
+      const res = await fetch("/api/chart-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: t, timeframe: tf }),
+      });
+      const data = await res.json();
+      setChartData(data);
+    } catch (e) {
+      console.error("Failed to load chart data:", e);
+    }
+  }, []);
+
+  // Load signal history
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/signals?limit=10");
+      const data = await res.json();
+      setSignalHistory(data.signals || []);
+    } catch (e) {
+      console.error("Failed to load signal history:", e);
+    }
+  }, []);
+
+  // Load history on mount
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const runAnalysis = async () => {
     setIsRunning(true);
@@ -55,6 +94,9 @@ export default function WarRoomDashboard() {
     setError(null);
     setCurrentStage(ALL_STAGES[0]);
     setProgress(0);
+
+    // Also fetch chart data in parallel
+    loadChartData(ticker, timeframe);
 
     try {
       const response = await fetch("/api/analyze", {
@@ -81,7 +123,6 @@ export default function WarRoomDashboard() {
               const dataStr = line.replace("data: ", "").trim();
               if (!dataStr) continue;
 
-              // Parse format: [MARKER] JSON
               const match = dataStr.match(/^\[(.*?)\] (.*)$/);
               if (match) {
                 const marker = match[1];
@@ -97,7 +138,6 @@ export default function WarRoomDashboard() {
                     setAgentData((prev) => ({ ...prev, [marker]: content.text }));
                   }
                   
-                  // Update progress
                   setCurrentStage(marker);
                   const stageIndex = ALL_STAGES.indexOf(marker);
                   if (stageIndex !== -1) {
@@ -112,6 +152,8 @@ export default function WarRoomDashboard() {
           }
         }
       }
+      // Reload history after analysis
+      loadHistory();
     } catch (err: any) {
       setError(err.message || "Failed to run analysis");
     } finally {
@@ -123,7 +165,6 @@ export default function WarRoomDashboard() {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900">
-      {/* Background Dot Grid */}
       <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
 
       {/* Header */}
@@ -131,9 +172,9 @@ export default function WarRoomDashboard() {
         <div className="flex items-center gap-3">
           <div className="h-3 w-3 rounded-full bg-cyan-500 animate-pulse" />
           <h1 className="text-xl font-bold text-white tracking-wider">AI TRADING WAR ROOM</h1>
+          <Badge variant="outline" className="text-cyan-400 border-cyan-500/30 bg-cyan-500/5 text-[10px]">v3.0</Badge>
         </div>
         
-        {/* Controls */}
         <div className="flex gap-4 items-center">
           <Input 
             value={ticker} 
@@ -149,6 +190,7 @@ export default function WarRoomDashboard() {
               <SelectItem value="1m">1m</SelectItem>
               <SelectItem value="5m">5m</SelectItem>
               <SelectItem value="15m">15m</SelectItem>
+              <SelectItem value="1h">1h</SelectItem>
             </SelectContent>
           </Select>
           <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
@@ -188,6 +230,75 @@ export default function WarRoomDashboard() {
       )}
 
       <main className="p-6 max-w-7xl mx-auto space-y-6">
+        {/* ═══ CHART + SIGNAL HISTORY TABS ═══ */}
+        <div className="border border-white/10 rounded-lg bg-black/30 backdrop-blur-sm overflow-hidden">
+          <div className="flex border-b border-white/10">
+            <button
+              onClick={() => setActiveTab("chart")}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "chart"
+                  ? "text-cyan-400 border-b-2 border-cyan-500 bg-cyan-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              📊 LIVE CHART
+            </button>
+            <button
+              onClick={() => setActiveTab("history")}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "history"
+                  ? "text-cyan-400 border-b-2 border-cyan-500 bg-cyan-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              📜 SIGNAL HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
+            </button>
+          </div>
+
+          {activeTab === "chart" && (
+            <div className="p-4">
+              <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "history" && (
+            <div className="p-4 max-h-[400px] overflow-y-auto">
+              {signalHistory.length === 0 ? (
+                <div className="text-center text-slate-600 py-8">
+                  No signals yet. Run an analysis to populate history.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {signalHistory.map((sig, i) => (
+                    <div key={i} className="flex items-center gap-4 p-3 bg-black/40 rounded border border-white/5 hover:border-white/15 transition-all">
+                      <div className={`px-2 py-1 rounded text-xs font-black ${
+                        sig.signal === "LONG" ? "bg-green-500/20 text-green-400" :
+                        sig.signal === "SHORT" ? "bg-red-500/20 text-red-400" :
+                        "bg-yellow-500/20 text-yellow-400"
+                      }`}>
+                        {sig.signal}
+                      </div>
+                      <div className="text-white font-bold text-sm">{sig.ticker}</div>
+                      <div className="text-slate-500 text-xs">{sig.timeframe}</div>
+                      <div className="text-slate-400 text-xs">
+                        Entry: {sig.entry_zone?.min?.toFixed(2)} - {sig.entry_zone?.max?.toFixed(2)}
+                      </div>
+                      <div className="text-slate-400 text-xs ml-auto">
+                        Conf: {sig.confidence}% | R:R {sig.risk_reward}
+                      </div>
+                      {sig.timestamp_utc && (
+                        <div className="text-slate-600 text-[10px]">
+                          {new Date(sig.timestamp_utc).toLocaleTimeString()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Analyst Layer */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <AgentCard title="FUNDAMENTAL" data={agentData["FUNDAMENTAL_ANALYST"]} />
@@ -229,7 +340,7 @@ export default function WarRoomDashboard() {
           <AgentCard title="RISK_MANAGER" data={agentData["RISK_MANAGER"]} accent="cyan" />
         </div>
 
-        {/* Signal Engine Deterministic Output */}
+        {/* Signal Engine Verdict */}
         {signal && (
           <div className="mt-8 animate-in slide-in-from-bottom-4 fade-in duration-700">
             <Card className="bg-slate-900 border-white/20 shadow-2xl relative overflow-hidden">
@@ -240,7 +351,12 @@ export default function WarRoomDashboard() {
               />
               <CardHeader className="border-b border-white/10 ml-2">
                 <div className="flex justify-between items-center">
-                  <CardTitle className="text-xl text-white">SIGNAL ENGINE VERDICT</CardTitle>
+                  <div>
+                    <CardTitle className="text-xl text-white">SIGNAL ENGINE VERDICT</CardTitle>
+                    {signal.market_regime && (
+                      <span className="text-xs text-slate-500 mt-1">Regime: {signal.market_regime}</span>
+                    )}
+                  </div>
                   <div className={`px-6 py-2 rounded font-black text-2xl tracking-widest ${
                     signal.signal === "LONG" ? "bg-green-500 text-black shadow-[0_0_20px_rgba(34,197,94,0.4)]" : 
                     signal.signal === "SHORT" ? "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]" : 
@@ -283,9 +399,25 @@ export default function WarRoomDashboard() {
                     <div className="text-slate-400">Pos Size:</div>
                     <div className="text-white font-bold">{signal.position_size_pct}%</div>
                   </div>
+
+                  {/* Indicators Used */}
+                  {signal.indicators_used && (
+                    <div className="mt-4 pt-3 border-t border-white/5">
+                      <h4 className="text-[10px] text-slate-600 font-bold tracking-widest uppercase mb-2">Indicators Used</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(signal.indicators_used).map(([key, val]) => (
+                          val !== null && (
+                            <span key={key} className="text-[10px] px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-cyan-400">
+                              {key}: {val}
+                            </span>
+                          )
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Automation string */}
+                {/* Webhook payload */}
                 <div className="space-y-4">
                   <h3 className="text-xs text-slate-500 font-bold tracking-widest uppercase">TradingView Webhook Payload</h3>
                   <div className="bg-black/60 border border-white/10 p-3 rounded text-xs text-cyan-400 break-all select-all focus:ring-1 focus:ring-cyan-500 cursor-copy">
@@ -296,7 +428,7 @@ export default function WarRoomDashboard() {
                   </div>
                 </div>
                 
-                {/* Reasons List */}
+                {/* Reasons */}
                 <div className="col-span-full mt-4 pt-4 border-t border-white/10 text-sm">
                   <h3 className="text-xs text-slate-500 font-bold tracking-widest uppercase mb-2">Rationale</h3>
                   <ul className="list-disc list-inside space-y-1 text-slate-300">
@@ -314,6 +446,188 @@ export default function WarRoomDashboard() {
   );
 }
 
+// ═══ MINI CHART COMPONENT (TradingView Lightweight Charts) ═══
+function MiniChart({ chartData, signal, ticker }: { chartData: any, signal: SignalPayload | null, ticker: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const [lwcLoaded, setLwcLoaded] = useState(false);
+  const [lwcModule, setLwcModule] = useState<any>(null);
+
+  // Load LWC library dynamically
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
+    script.async = true;
+    script.onload = () => {
+      setLwcLoaded(true);
+      setLwcModule((window as any).LightweightCharts);
+    };
+    document.head.appendChild(script);
+    return () => { document.head.removeChild(script); };
+  }, []);
+
+  // Render chart when data arrives
+  useEffect(() => {
+    if (!lwcLoaded || !lwcModule || !containerRef.current || !chartData?.candles?.length) return;
+
+    // Clear previous chart
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+    }
+
+    const chart = lwcModule.createChart(containerRef.current, {
+      layout: {
+        background: { type: "solid", color: "#0a0a0b" },
+        textColor: "#64748b",
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: "rgba(255,255,255,0.03)" },
+        horzLines: { color: "rgba(255,255,255,0.03)" },
+      },
+      crosshair: {
+        mode: 0,
+        vertLine: { color: "rgba(103,232,249,0.3)", width: 1, style: 2 },
+        horzLine: { color: "rgba(103,232,249,0.3)", width: 1, style: 2 },
+      },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
+      timeScale: {
+        borderColor: "rgba(255,255,255,0.1)",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: containerRef.current.clientWidth,
+      height: 350,
+    });
+
+    // Candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+    candleSeries.setData(chartData.candles);
+
+    // Volume
+    const volumeSeries = chart.addHistogramSeries({
+      color: "rgba(103,232,249,0.15)",
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+    const volData = chartData.candles.map((c: any) => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)",
+    }));
+    volumeSeries.setData(volData);
+
+    // EMA 9 overlay
+    if (chartData.indicators?.ema9?.length) {
+      const ema9Series = chart.addLineSeries({ color: "#67e8f9", lineWidth: 1, priceLineVisible: false });
+      ema9Series.setData(chartData.indicators.ema9);
+    }
+
+    // EMA 21 overlay
+    if (chartData.indicators?.ema21?.length) {
+      const ema21Series = chart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false });
+      ema21Series.setData(chartData.indicators.ema21);
+    }
+
+    // VWAP overlay
+    if (chartData.indicators?.vwap?.length) {
+      const vwapSeries = chart.addLineSeries({ color: "#a78bfa", lineWidth: 1, lineStyle: 2, priceLineVisible: false });
+      vwapSeries.setData(chartData.indicators.vwap);
+    }
+
+    // Signal levels (entry zone, SL, TP)
+    if (signal && signal.signal !== "NO_TRADE") {
+      const entryColor = signal.signal === "LONG" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
+      
+      candleSeries.createPriceLine({
+        price: signal.entry_zone.min,
+        color: entryColor,
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "Entry Min",
+      });
+      candleSeries.createPriceLine({
+        price: signal.entry_zone.max,
+        color: entryColor,
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "Entry Max",
+      });
+      candleSeries.createPriceLine({
+        price: signal.stop_loss,
+        color: "#ef4444",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: "SL",
+      });
+      signal.take_profit.forEach((tp) => {
+        candleSeries.createPriceLine({
+          price: tp.price,
+          color: "#22c55e",
+          lineWidth: 1,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: `TP${tp.level}`,
+        });
+      });
+    }
+
+    chart.timeScale().fitContent();
+    chartRef.current = chart;
+
+    // Responsive
+    const handleResize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [lwcLoaded, lwcModule, chartData, signal]);
+
+  if (!chartData?.candles?.length) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-slate-600">
+        <div className="text-center">
+          <div className="text-3xl mb-2">📊</div>
+          <div className="text-sm">Run an analysis to load chart data</div>
+          <div className="text-[10px] mt-1 text-slate-700">{ticker} • With EMA 9/21, VWAP overlays & signal levels</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-xs text-white font-bold">{chartData.ticker || ticker}</span>
+        <span className="text-[10px] text-slate-600">{chartData.symbol}</span>
+        <div className="flex gap-3 ml-auto text-[10px]">
+          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 inline-block"></span> EMA 9</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-400 inline-block"></span> EMA 21</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-400 inline-block" style={{borderTop: "1px dashed"}}></span> VWAP</span>
+        </div>
+      </div>
+      <div ref={containerRef} className="w-full rounded overflow-hidden" />
+    </div>
+  );
+}
+
+// ═══ AGENT CARD COMPONENT ═══
 function AgentCard({ title, data, accent = "white" }: { title: string, data?: string, accent?: string }) {
   const isComplete = !!data;
   
