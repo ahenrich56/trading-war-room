@@ -5,5 +5,4 @@ openai
 python-dotenv
 yfinance
 pandas
-pandas-ta
 numpy

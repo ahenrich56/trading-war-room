@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 import openai
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 
 load_dotenv()
@@ -28,7 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Clients ───────────────────────────────────────────────
 KILO_API_KEY = os.getenv("KILO_API_KEY", "")
 
 try:
@@ -55,7 +53,6 @@ TICKER_MAP = {
     "DXY": "DX-Y.NYB",
 }
 
-# Market context tickers (always fetched)
 CONTEXT_TICKERS = {
     "VIX": "^VIX",
     "DXY": "DX-Y.NYB",
@@ -63,7 +60,6 @@ CONTEXT_TICKERS = {
     "SP500": "ES=F",
 }
 
-# ─── Models ────────────────────────────────────────────────
 class AnalysisRequest(BaseModel):
     ticker: str
     timeframe: str
@@ -75,88 +71,161 @@ def resolve_ticker(raw: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
-#  1. SERVER-SIDE TECHNICAL INDICATORS
+#  PURE PANDAS/NUMPY INDICATOR COMPUTATIONS (no pandas-ta)
 # ═══════════════════════════════════════════════════════════
 
+def _ema(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+def _rsi(close: pd.Series, period: int = 14) -> float:
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    val = rsi.iloc[-1]
+    return round(float(val), 2) if not pd.isna(val) else None
+
+def _macd(close: pd.Series, fast=12, slow=26, signal=9) -> dict:
+    ema_fast = _ema(close, fast)
+    ema_slow = _ema(close, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = _ema(macd_line, signal)
+    histogram = macd_line - signal_line
+    return {
+        "MACD_line": round(float(macd_line.iloc[-1]), 2) if not pd.isna(macd_line.iloc[-1]) else None,
+        "MACD_signal": round(float(signal_line.iloc[-1]), 2) if not pd.isna(signal_line.iloc[-1]) else None,
+        "MACD_histogram": round(float(histogram.iloc[-1]), 2) if not pd.isna(histogram.iloc[-1]) else None,
+    }
+
+def _bollinger(close: pd.Series, period=20, std_dev=2) -> dict:
+    sma = close.rolling(period).mean()
+    std = close.rolling(period).std()
+    upper = sma + std_dev * std
+    lower = sma - std_dev * std
+    return {
+        "BB_upper": round(float(upper.iloc[-1]), 2) if not pd.isna(upper.iloc[-1]) else None,
+        "BB_mid": round(float(sma.iloc[-1]), 2) if not pd.isna(sma.iloc[-1]) else None,
+        "BB_lower": round(float(lower.iloc[-1]), 2) if not pd.isna(lower.iloc[-1]) else None,
+    }
+
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period=14) -> float:
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.ewm(span=period, adjust=False).mean()
+    val = atr.iloc[-1]
+    return round(float(val), 2) if not pd.isna(val) else None
+
+def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period=14) -> float:
+    plus_dm = high.diff()
+    minus_dm = -low.diff()
+    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.ewm(span=period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / atr)
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    adx = dx.ewm(span=period, adjust=False).mean()
+    val = adx.iloc[-1]
+    return round(float(val), 2) if not pd.isna(val) else None
+
+def _stoch_rsi(close: pd.Series, period=14, smooth_k=3, smooth_d=3) -> dict:
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    rsi_min = rsi.rolling(period).min()
+    rsi_max = rsi.rolling(period).max()
+    stoch_rsi = (rsi - rsi_min) / (rsi_max - rsi_min)
+    k = stoch_rsi.rolling(smooth_k).mean() * 100
+    d = k.rolling(smooth_d).mean()
+    return {
+        "StochRSI_K": round(float(k.iloc[-1]), 2) if not pd.isna(k.iloc[-1]) else None,
+        "StochRSI_D": round(float(d.iloc[-1]), 2) if not pd.isna(d.iloc[-1]) else None,
+    }
+
+def _vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> float:
+    tp = (high + low + close) / 3
+    cumvol = volume.cumsum()
+    cumtp = (tp * volume).cumsum()
+    vwap = cumtp / cumvol
+    val = vwap.iloc[-1]
+    return round(float(val), 2) if not pd.isna(val) else None
+
+
 def compute_indicators(df: pd.DataFrame) -> dict:
-    """Compute real technical indicators from OHLCV data using pandas-ta."""
+    """Compute all technical indicators from OHLCV using pure pandas/numpy."""
     if df.empty or len(df) < 20:
         return {"error": "Insufficient data for indicator computation"}
 
     indicators = {}
-
     try:
         close = df["Close"]
         high = df["High"]
         low = df["Low"]
         volume = df["Volume"]
 
+        current_price = round(float(close.iloc[-1]), 2)
+        indicators["current_price"] = current_price
+
         # RSI
-        rsi = ta.rsi(close, length=14)
-        if rsi is not None and len(rsi) > 0:
-            indicators["RSI_14"] = round(float(rsi.iloc[-1]), 2) if not pd.isna(rsi.iloc[-1]) else None
+        indicators["RSI_14"] = _rsi(close, 14)
 
         # MACD
-        macd = ta.macd(close, fast=12, slow=26, signal=9)
-        if macd is not None and not macd.empty:
-            indicators["MACD_line"] = round(float(macd.iloc[-1, 0]), 2) if not pd.isna(macd.iloc[-1, 0]) else None
-            indicators["MACD_histogram"] = round(float(macd.iloc[-1, 1]), 2) if not pd.isna(macd.iloc[-1, 1]) else None
-            indicators["MACD_signal"] = round(float(macd.iloc[-1, 2]), 2) if not pd.isna(macd.iloc[-1, 2]) else None
+        macd = _macd(close)
+        indicators.update(macd)
 
         # Bollinger Bands
-        bb = ta.bbands(close, length=20, std=2)
-        if bb is not None and not bb.empty:
-            indicators["BB_upper"] = round(float(bb.iloc[-1, 0]), 2) if not pd.isna(bb.iloc[-1, 0]) else None
-            indicators["BB_mid"] = round(float(bb.iloc[-1, 1]), 2) if not pd.isna(bb.iloc[-1, 1]) else None
-            indicators["BB_lower"] = round(float(bb.iloc[-1, 2]), 2) if not pd.isna(bb.iloc[-1, 2]) else None
+        bb = _bollinger(close)
+        indicators.update(bb)
 
         # ATR
-        atr = ta.atr(high, low, close, length=14)
-        if atr is not None and len(atr) > 0:
-            indicators["ATR_14"] = round(float(atr.iloc[-1]), 2) if not pd.isna(atr.iloc[-1]) else None
+        indicators["ATR_14"] = _atr(high, low, close, 14)
+
+        # ADX
+        indicators["ADX"] = _adx(high, low, close, 14)
 
         # EMAs
         for period in [9, 21, 50, 200]:
-            ema = ta.ema(close, length=period)
-            if ema is not None and len(ema) > 0 and not pd.isna(ema.iloc[-1]):
+            ema = _ema(close, period)
+            if len(ema) > 0 and not pd.isna(ema.iloc[-1]):
                 indicators[f"EMA_{period}"] = round(float(ema.iloc[-1]), 2)
 
-        # VWAP (intraday only - needs volume)
+        # VWAP
         try:
-            vwap = ta.vwap(high, low, close, volume)
-            if vwap is not None and len(vwap) > 0 and not pd.isna(vwap.iloc[-1]):
-                indicators["VWAP"] = round(float(vwap.iloc[-1]), 2)
+            indicators["VWAP"] = _vwap(high, low, close, volume)
         except Exception:
             pass
 
         # Stochastic RSI
-        stochrsi = ta.stochrsi(close, length=14)
-        if stochrsi is not None and not stochrsi.empty:
-            indicators["StochRSI_K"] = round(float(stochrsi.iloc[-1, 0]), 2) if not pd.isna(stochrsi.iloc[-1, 0]) else None
-            indicators["StochRSI_D"] = round(float(stochrsi.iloc[-1, 1]), 2) if not pd.isna(stochrsi.iloc[-1, 1]) else None
-
-        # ADX (trend strength)
-        adx = ta.adx(high, low, close, length=14)
-        if adx is not None and not adx.empty:
-            indicators["ADX"] = round(float(adx.iloc[-1, 0]), 2) if not pd.isna(adx.iloc[-1, 0]) else None
+        stoch = _stoch_rsi(close)
+        indicators.update(stoch)
 
         # Volume analysis
         avg_vol = volume.rolling(20).mean()
-        if avg_vol is not None and len(avg_vol) > 0 and not pd.isna(avg_vol.iloc[-1]):
-            current_vol = float(volume.iloc[-1])
-            average_vol = float(avg_vol.iloc[-1])
-            indicators["current_volume"] = int(current_vol)
-            indicators["avg_volume_20"] = int(average_vol)
-            indicators["volume_ratio"] = round(current_vol / average_vol, 2) if average_vol > 0 else 0
+        if len(avg_vol) > 0 and not pd.isna(avg_vol.iloc[-1]):
+            cv = float(volume.iloc[-1])
+            av = float(avg_vol.iloc[-1])
+            indicators["current_volume"] = int(cv)
+            indicators["avg_volume_20"] = int(av)
+            indicators["volume_ratio"] = round(cv / av, 2) if av > 0 else 0
 
-        # Price position relative to key levels
-        current_price = float(close.iloc[-1])
-        indicators["current_price"] = round(current_price, 2)
-
+        # Derived conditions
         if "EMA_9" in indicators and "EMA_21" in indicators:
             indicators["EMA_9_21_cross"] = "BULLISH" if indicators["EMA_9"] > indicators["EMA_21"] else "BEARISH"
 
-        if "VWAP" in indicators:
+        if "VWAP" in indicators and indicators["VWAP"]:
             indicators["price_vs_VWAP"] = "ABOVE" if current_price > indicators["VWAP"] else "BELOW"
 
         if indicators.get("RSI_14"):
@@ -174,63 +243,37 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     return indicators
 
 
-def format_indicators_for_ai(indicators: dict, timeframe_label: str) -> str:
-    """Format computed indicators into a readable string for AI prompts."""
+def format_indicators_for_ai(indicators: dict, label: str) -> str:
     if "error" in indicators:
-        return f"[{timeframe_label}] {indicators['error']}"
+        return f"[{label}] {indicators['error']}"
 
-    lines = [f"═══ {timeframe_label} INDICATORS ═══"]
+    lines = [f"═══ {label} INDICATORS ═══"]
+    lines.append(f"  Price: {indicators.get('current_price', 'N/A')}")
 
-    price = indicators.get("current_price", "N/A")
-    lines.append(f"  Price: {price}")
-
-    # Trend
     ema_cross = indicators.get("EMA_9_21_cross", "N/A")
     adx = indicators.get("ADX", "N/A")
-    lines.append(f"  Trend: EMA 9/21 cross={ema_cross}, ADX={adx}")
+    lines.append(f"  Trend: EMA 9/21={ema_cross}, ADX={adx}")
 
-    emas = []
-    for p in [9, 21, 50, 200]:
-        v = indicators.get(f"EMA_{p}")
-        if v:
-            emas.append(f"EMA{p}={v}")
+    emas = [f"EMA{p}={indicators[f'EMA_{p}']}" for p in [9, 21, 50, 200] if f"EMA_{p}" in indicators]
     if emas:
         lines.append(f"  EMAs: {', '.join(emas)}")
 
-    # Momentum
     rsi = indicators.get("RSI_14", "N/A")
     rsi_cond = indicators.get("RSI_condition", "")
     lines.append(f"  RSI(14): {rsi} ({rsi_cond})")
 
-    macd_h = indicators.get("MACD_histogram", "N/A")
-    macd_l = indicators.get("MACD_line", "N/A")
-    macd_s = indicators.get("MACD_signal", "N/A")
-    lines.append(f"  MACD: line={macd_l}, signal={macd_s}, histogram={macd_h}")
-
-    stoch_k = indicators.get("StochRSI_K", "N/A")
-    stoch_d = indicators.get("StochRSI_D", "N/A")
-    lines.append(f"  StochRSI: K={stoch_k}, D={stoch_d}")
-
-    # Volatility
-    atr = indicators.get("ATR_14", "N/A")
-    bb_u = indicators.get("BB_upper", "N/A")
-    bb_m = indicators.get("BB_mid", "N/A")
-    bb_l = indicators.get("BB_lower", "N/A")
-    lines.append(f"  ATR(14): {atr}")
-    lines.append(f"  Bollinger: upper={bb_u}, mid={bb_m}, lower={bb_l}")
-
-    # Volume
-    vwap = indicators.get("VWAP", "N/A")
-    vol_ratio = indicators.get("volume_ratio", "N/A")
-    price_vs_vwap = indicators.get("price_vs_VWAP", "N/A")
-    lines.append(f"  VWAP: {vwap} (price {price_vs_vwap})")
-    lines.append(f"  Volume ratio (vs 20-avg): {vol_ratio}x")
+    lines.append(f"  MACD: line={indicators.get('MACD_line', 'N/A')}, signal={indicators.get('MACD_signal', 'N/A')}, hist={indicators.get('MACD_histogram', 'N/A')}")
+    lines.append(f"  StochRSI: K={indicators.get('StochRSI_K', 'N/A')}, D={indicators.get('StochRSI_D', 'N/A')}")
+    lines.append(f"  ATR(14): {indicators.get('ATR_14', 'N/A')}")
+    lines.append(f"  Bollinger: upper={indicators.get('BB_upper', 'N/A')}, mid={indicators.get('BB_mid', 'N/A')}, lower={indicators.get('BB_lower', 'N/A')}")
+    lines.append(f"  VWAP: {indicators.get('VWAP', 'N/A')} (price {indicators.get('price_vs_VWAP', 'N/A')})")
+    lines.append(f"  Volume ratio: {indicators.get('volume_ratio', 'N/A')}x avg")
 
     return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════
-#  2. MULTI-TIMEFRAME ANALYSIS
+#  MULTI-TIMEFRAME ANALYSIS
 # ═══════════════════════════════════════════════════════════
 
 TIMEFRAME_CONFIG = {
@@ -244,39 +287,32 @@ TIMEFRAME_CONFIG = {
 
 
 def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
-    """Fetch OHLCV data and compute indicators across multiple timeframes."""
     yf_symbol = resolve_ticker(ticker)
     configs = TIMEFRAME_CONFIG.get(primary_tf, TIMEFRAME_CONFIG["5m"])
 
     results = {}
-    bars_data = None  # Store primary TF bars for the signal engine
+    bars_data = None
 
     for interval, period, label in configs:
         try:
             tk = yf.Ticker(yf_symbol)
             df = tk.history(period=period, interval=interval)
-
             if df.empty:
                 results[label] = {"error": f"No data for {interval}"}
                 continue
 
-            indicators = compute_indicators(df)
-            results[label] = indicators
+            results[label] = compute_indicators(df)
 
-            # Store the primary timeframe bars for raw data context
-            if interval == primary_tf or (bars_data is None):
+            if interval == primary_tf or bars_data is None:
                 recent = df.tail(10)
-                bars = []
-                for idx, row in recent.iterrows():
-                    bars.append({
-                        "time": str(idx),
-                        "O": round(float(row["Open"]), 2),
-                        "H": round(float(row["High"]), 2),
-                        "L": round(float(row["Low"]), 2),
-                        "C": round(float(row["Close"]), 2),
-                        "V": int(row["Volume"])
-                    })
-                bars_data = bars
+                bars_data = [{
+                    "time": str(idx),
+                    "O": round(float(row["Open"]), 2),
+                    "H": round(float(row["High"]), 2),
+                    "L": round(float(row["Low"]), 2),
+                    "C": round(float(row["Close"]), 2),
+                    "V": int(row["Volume"])
+                } for idx, row in recent.iterrows()]
 
         except Exception as e:
             results[label] = {"error": str(e)}
@@ -285,7 +321,6 @@ def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
 
 
 def build_mtf_summary(mtf_data: dict, ticker: str) -> str:
-    """Build a human-readable multi-timeframe summary for AI prompts."""
     lines = [f"╔══════════════════════════════════════╗"]
     lines.append(f"║  MULTI-TIMEFRAME ANALYSIS: {ticker}")
     lines.append(f"╚══════════════════════════════════════╝\n")
@@ -294,30 +329,28 @@ def build_mtf_summary(mtf_data: dict, ticker: str) -> str:
         lines.append(format_indicators_for_ai(indicators, label))
         lines.append("")
 
-    # MTF Confluence summary
+    # MTF Confluence
     trends = []
     for label, ind in mtf_data["indicators"].items():
         if isinstance(ind, dict) and "EMA_9_21_cross" in ind:
             trends.append(f"{label}: {ind['EMA_9_21_cross']}")
 
     if trends:
-        lines.append(f"═══ MTF TREND CONFLUENCE ═══")
+        lines.append("═══ MTF TREND CONFLUENCE ═══")
         for t in trends:
             lines.append(f"  {t}")
-
-        bullish_count = sum(1 for t in trends if "BULLISH" in t)
-        bearish_count = sum(1 for t in trends if "BEARISH" in t)
-        lines.append(f"  Alignment: {bullish_count} BULLISH / {bearish_count} BEARISH out of {len(trends)} timeframes")
+        bullish = sum(1 for t in trends if "BULLISH" in t)
+        bearish = sum(1 for t in trends if "BEARISH" in t)
+        lines.append(f"  Alignment: {bullish} BULLISH / {bearish} BEARISH out of {len(trends)} timeframes")
 
     return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════
-#  3. MARKET CONTEXT LAYER (VIX, DXY, US10Y, ES)
+#  MARKET CONTEXT LAYER
 # ═══════════════════════════════════════════════════════════
 
 def fetch_market_context() -> str:
-    """Fetch real-time market context from correlated instruments."""
     lines = ["═══ MARKET CONTEXT ═══"]
 
     for name, symbol in CONTEXT_TICKERS.items():
@@ -329,11 +362,9 @@ def fetch_market_context() -> str:
                 continue
 
             current = round(float(df["Close"].iloc[-1]), 2)
-
-            # Calculate session change
-            day_df = tk.history(period="1d", interval="1d")
-            if not day_df.empty and len(day_df) >= 1:
-                prev_close = float(day_df["Close"].iloc[-1])
+            day_df = tk.history(period="5d", interval="1d")
+            if not day_df.empty and len(day_df) >= 2:
+                prev_close = float(day_df["Close"].iloc[-2])
                 pct = round(((current - prev_close) / prev_close) * 100, 2)
             else:
                 pct = 0.0
@@ -344,59 +375,42 @@ def fetch_market_context() -> str:
         except Exception as e:
             lines.append(f"  {name}: Error ({str(e)[:50]})")
 
-    # Add interpretive context
-    lines.append("")
-    lines.append("  Interpretation Guide:")
-    lines.append("  - VIX > 25 = High fear/volatility, reduce position sizes")
-    lines.append("  - VIX < 15 = Low vol, potential complacency")
-    lines.append("  - DXY rising = Pressure on equities and gold")
+    lines.append("\n  Interpretation:")
+    lines.append("  - VIX > 25 = High fear, reduce size")
+    lines.append("  - DXY rising = Pressure on equities/gold")
     lines.append("  - US10Y rising = Rate-sensitive sectors under pressure")
 
     return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════
-#  4. ECONOMIC CALENDAR
+#  ECONOMIC CALENDAR
 # ═══════════════════════════════════════════════════════════
 
 def get_economic_calendar() -> str:
-    """
-    Provide awareness of major scheduled economic events.
-    Uses a static high-impact events list since free calendar APIs are unreliable.
-    """
     now = datetime.utcnow()
-    day_of_week = now.strftime("%A")
+    day = now.strftime("%A")
     hour = now.hour
-
     warnings = []
 
-    # Known high-impact recurring events (UTC times)
-    # These are general awareness - not a real-time calendar
-    if day_of_week == "Wednesday":
-        if 18 <= hour <= 20:
-            warnings.append("⚠️ FOMC / Fed minutes typically release Wed 2PM ET (18:00 UTC). HIGH VOLATILITY EXPECTED.")
+    if day == "Wednesday" and 18 <= hour <= 20:
+        warnings.append("⚠️ FOMC typically releases Wed 2PM ET. HIGH VOLATILITY EXPECTED.")
+    if day == "Friday" and 12 <= hour <= 14:
+        warnings.append("⚠️ NFP releases first Friday at 8:30 AM ET. Check if today is NFP day.")
+    if day in ["Tuesday", "Wednesday", "Thursday"] and 12 <= hour <= 14:
+        warnings.append("ℹ️ CPI/PPI often releases Tue-Thu 8:30 AM ET. Check calendar.")
 
-    if day_of_week == "Friday":
-        if 12 <= hour <= 14:
-            warnings.append("⚠️ NFP (Non-Farm Payrolls) releases first Friday of month at 8:30 AM ET. Check if today is NFP day.")
+    if day in ["Saturday", "Sunday"]:
+        warnings.append("📅 Weekend: Limited futures liquidity.")
+    elif hour < 13 or hour > 21:
+        warnings.append("🕐 Outside US regular hours. Lower liquidity.")
+    elif 13 <= hour <= 14:
+        warnings.append("🔔 US market open. Expect high volatility first 30 min.")
+    elif 19 <= hour <= 20:
+        warnings.append("🔔 Power hour. Institutional volume increasing.")
 
-    if day_of_week in ["Tuesday", "Wednesday", "Thursday"]:
-        if 12 <= hour <= 14:
-            warnings.append("ℹ️ CPI/PPI data often releases Tue-Thu at 8:30 AM ET. Check economic calendar.")
-
-    # Market hours awareness
-    if day_of_week in ["Saturday", "Sunday"]:
-        warnings.append("📅 Weekend: Futures markets have limited Sunday evening liquidity. Crypto trades 24/7.")
-    elif hour < 13 or hour > 21:  # Before 8AM ET or after 4PM ET
-        warnings.append("🕐 Outside regular US market hours. Futures active but lower liquidity. Watch for overnight gaps.")
-    elif 13 <= hour <= 14:  # 8-9 AM ET
-        warnings.append("🔔 US market open approaching/just opened. Expect high volatility first 30 minutes.")
-    elif 19 <= hour <= 20:  # 2-3 PM ET
-        warnings.append("🔔 Power hour approaching. Institutional volume increases into the close.")
-
-    # General advice
-    warnings.append(f"📆 Current UTC time: {now.strftime('%Y-%m-%d %H:%M')} ({day_of_week})")
-    warnings.append("💡 Always check forexfactory.com or investing.com/economic-calendar before trading.")
+    warnings.append(f"📆 UTC: {now.strftime('%Y-%m-%d %H:%M')} ({day})")
+    warnings.append("💡 Check forexfactory.com before trading.")
 
     return "═══ ECONOMIC CALENDAR ═══\n" + "\n".join(f"  {w}" for w in warnings)
 
@@ -409,14 +423,13 @@ async def ask_ai(role: str, prompt: str, max_tokens: int = 300) -> str:
     if not client:
         await asyncio.sleep(1)
         return f"[{role}] Mock response - missing API key."
-
     try:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=max_tokens,
             temperature=0.3,
             messages=[
-                {"role": "system", "content": f"You are a hedge fund {role}. Provide decisive, data-driven analysis. Reference the exact indicator values provided. Be specific about price levels."},
+                {"role": "system", "content": f"You are a hedge fund {role}. Provide decisive, data-driven analysis. Reference exact indicator values provided. Be specific about price levels."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -440,56 +453,29 @@ async def generate_analysis_stream(req: AnalysisRequest):
     try:
         # ── 0. Fetch ALL data concurrently ──
         loop = asyncio.get_event_loop()
-
-        mtf_future = loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf)
-        context_future = loop.run_in_executor(executor, fetch_market_context)
-        calendar_future = loop.run_in_executor(executor, get_economic_calendar)
-
         mtf_data, market_context, econ_calendar = await asyncio.gather(
-            mtf_future, context_future, calendar_future
+            loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf),
+            loop.run_in_executor(executor, fetch_market_context),
+            loop.run_in_executor(executor, get_economic_calendar),
         )
 
-        # Build the comprehensive data package
         mtf_summary = build_mtf_summary(mtf_data, ticker)
-        primary_indicators = list(mtf_data["indicators"].values())[0] if mtf_data["indicators"] else {}
-        current_price = primary_indicators.get("current_price", "UNKNOWN")
+        primary = list(mtf_data["indicators"].values())[0] if mtf_data["indicators"] else {}
+        current_price = primary.get("current_price", "UNKNOWN")
 
-        # Full data context string
-        full_data = f"""
-{mtf_summary}
-
-{market_context}
-
-{econ_calendar}
-"""
+        full_data = f"{mtf_summary}\n\n{market_context}\n\n{econ_calendar}"
 
         price_anchor = (
-            f"\n\nCRITICAL: The CURRENT LIVE PRICE of {ticker} is {current_price}. "
-            f"ALL entry zones, stop losses, and take profits MUST be within a realistic "
-            f"range of this price. DO NOT hallucinate prices."
+            f"\nCRITICAL: CURRENT LIVE PRICE of {ticker} is {current_price}. "
+            f"ALL prices MUST be within realistic range of {current_price}. DO NOT hallucinate."
         )
 
         # ── 1. ANALYST TEAM ──
         analysts = {
-            "FUNDAMENTAL_ANALYST": (
-                f"Analyze {ticker} fundamentals. Current price: {current_price}. "
-                f"Reference these real indicators:\n{mtf_summary}\n{market_context}"
-            ),
-            "SENTIMENT_ANALYST": (
-                f"Analyze retail and institutional sentiment for {ticker}. "
-                f"Current price: {current_price}. Volume ratio: {primary_indicators.get('volume_ratio', 'N/A')}x average. "
-                f"RSI: {primary_indicators.get('RSI_14', 'N/A')}. "
-                f"Context:\n{market_context}"
-            ),
-            "NEWS_ANALYST": (
-                f"Analyze macroeconomic factors impacting {ticker}. "
-                f"Current price: {current_price}.\n{market_context}\n{econ_calendar}"
-            ),
-            "TECHNICAL_ANALYST": (
-                f"Provide technical analysis for {ticker} using these REAL computed indicators. "
-                f"Reference the exact values below. Do NOT make up indicator values.\n"
-                f"{mtf_summary}\n{price_anchor}"
-            ),
+            "FUNDAMENTAL_ANALYST": f"Analyze {ticker} fundamentals. Price: {current_price}.\n{mtf_summary}\n{market_context}",
+            "SENTIMENT_ANALYST": f"Analyze sentiment for {ticker}. Price: {current_price}. Vol ratio: {primary.get('volume_ratio', 'N/A')}x. RSI: {primary.get('RSI_14', 'N/A')}.\n{market_context}",
+            "NEWS_ANALYST": f"Analyze macro factors for {ticker}. Price: {current_price}.\n{market_context}\n{econ_calendar}",
+            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators below. Reference exact values.\n{mtf_summary}{price_anchor}",
         }
 
         analyst_outputs = {}
@@ -499,78 +485,59 @@ async def generate_analysis_stream(req: AnalysisRequest):
             yield emit(role, {"text": text})
 
         # ── 2. RESEARCHER DEBATE ──
-        context = json.dumps(analyst_outputs)
+        context_str = json.dumps(analyst_outputs)
 
-        bear_prompt = (
-            f"Using this analyst data and REAL indicators: {context}\n"
-            f"Full data:\n{full_data}\n"
-            f"Argue the BEARISH case against {ticker} at {current_price}. "
-            f"Use specific indicator values to support your argument."
-        )
-        bear_text = await ask_ai("BEAR_RESEARCHER", bear_prompt, 300)
+        bear_text = await ask_ai("BEAR_RESEARCHER",
+            f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
+            f"Argue BEARISH case against {ticker} at {current_price}. Use specific indicator values.", 300)
         yield emit("BEAR_RESEARCHER", {"text": bear_text})
 
-        bull_prompt = (
-            f"Using this analyst data and REAL indicators: {context}\n"
-            f"Full data:\n{full_data}\n"
-            f"Argue the BULLISH case for {ticker} at {current_price}. "
-            f"Use specific indicator values to defend your position."
-        )
-        bull_text = await ask_ai("BULL_RESEARCHER", bull_prompt, 300)
+        bull_text = await ask_ai("BULL_RESEARCHER",
+            f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
+            f"Argue BULLISH case for {ticker} at {current_price}. Use specific indicator values.", 300)
         yield emit("BULL_RESEARCHER", {"text": bull_text})
 
         # ── 3. TRADER & RISK ──
-        trader_prompt = (
-            f"Review bull/bear arguments for {ticker}. Current price: {current_price}. "
-            f"Key levels: ATR={primary_indicators.get('ATR_14', 'N/A')}, "
-            f"BB upper={primary_indicators.get('BB_upper', 'N/A')}, "
-            f"BB lower={primary_indicators.get('BB_lower', 'N/A')}, "
-            f"VWAP={primary_indicators.get('VWAP', 'N/A')}. "
-            f"Timeframe: {tf}. Be decisive about direction and exact levels."
-        )
-        trader_text = await ask_ai("TRADER_DECISION", trader_prompt, 250)
+        trader_text = await ask_ai("TRADER_DECISION",
+            f"Review bull/bear for {ticker}. Price: {current_price}. "
+            f"ATR={primary.get('ATR_14', 'N/A')}, BB upper={primary.get('BB_upper', 'N/A')}, "
+            f"BB lower={primary.get('BB_lower', 'N/A')}, VWAP={primary.get('VWAP', 'N/A')}. "
+            f"Timeframe: {tf}. Be decisive.", 250)
         yield emit("TRADER_DECISION", {"text": trader_text})
 
-        atr_val = primary_indicators.get("ATR_14", 0)
-        risk_prompt = (
-            f"Review the trader's plan for {ticker} at {current_price}. "
-            f"ATR(14) = {atr_val} (use this for stop loss sizing). "
-            f"Risk profile: {risk}. "
-            f"VIX context:\n{market_context}\n"
-            f"Do we approve? Size recommendation in % of portfolio."
-        )
-        risk_text = await ask_ai("RISK_MANAGER", risk_prompt, 250)
+        atr_val = primary.get("ATR_14", 0)
+        risk_text = await ask_ai("RISK_MANAGER",
+            f"Review trader plan for {ticker} at {current_price}. ATR(14)={atr_val}. "
+            f"Risk profile: {risk}.\n{market_context}\nApprove? Size recommendation.", 250)
         yield emit("RISK_MANAGER", {"text": risk_text})
 
         # ── 4. SIGNAL ENGINE ──
-        # Use ATR for realistic SL/TP calculations
         atr_num = float(atr_val) if atr_val and atr_val != "N/A" else (float(current_price) * 0.005 if isinstance(current_price, (int, float)) else 50)
         cp = float(current_price) if isinstance(current_price, (int, float)) else 0
 
         json_prompt = f"""
-Based on all previous context for {ticker} on {tf} timeframe, risk profile '{risk}':
+Based on all context for {ticker} on {tf}, risk profile '{risk}':
 
-CRITICAL PRICE DATA (USE THESE EXACT VALUES):
+CRITICAL PRICE DATA:
 - Current price: {current_price}
-- ATR(14): {atr_val} (use 1-2x ATR for stop loss distance)
-- RSI(14): {primary_indicators.get('RSI_14', 'N/A')}
-- MACD histogram: {primary_indicators.get('MACD_histogram', 'N/A')}
-- EMA 9/21 cross: {primary_indicators.get('EMA_9_21_cross', 'N/A')}
-- Price vs VWAP: {primary_indicators.get('price_vs_VWAP', 'N/A')}
-- BB upper: {primary_indicators.get('BB_upper', 'N/A')}
-- BB lower: {primary_indicators.get('BB_lower', 'N/A')}
-- ADX: {primary_indicators.get('ADX', 'N/A')}
+- ATR(14): {atr_val} (use 1-2x ATR for stop distance)
+- RSI(14): {primary.get('RSI_14', 'N/A')}
+- MACD histogram: {primary.get('MACD_histogram', 'N/A')}
+- EMA 9/21 cross: {primary.get('EMA_9_21_cross', 'N/A')}
+- Price vs VWAP: {primary.get('price_vs_VWAP', 'N/A')}
+- BB upper: {primary.get('BB_upper', 'N/A')}
+- BB lower: {primary.get('BB_lower', 'N/A')}
+- ADX: {primary.get('ADX', 'N/A')}
 
 RULES:
-- Entry zone: within 0.5x ATR of {current_price}
-- Stop loss: 1-2x ATR from entry ({round(cp - atr_num * 1.5, 2)} to {round(cp - atr_num, 2)} for LONG)
-- Take profit 1: 1.5-2x ATR from entry
-- Take profit 2: 2.5-3x ATR from entry
-- If RSI > 75 or < 25, reduce confidence
-- If ADX < 20, market is ranging - reduce confidence
-- If multi-timeframe trends conflict, reduce confidence
+- Entry: within 0.5x ATR of {current_price}
+- SL: 1-2x ATR from entry
+- TP1: 1.5-2x ATR, TP2: 2.5-3x ATR
+- RSI>75 or <25: reduce confidence
+- ADX<20: ranging, reduce confidence
+- MTF conflict: reduce confidence
 
-Output ONLY valid JSON. No markdown, no code blocks:
+Output ONLY valid JSON, no markdown:
 {{
     "ticker": "{ticker}",
     "timestamp_utc": "{datetime.utcnow().isoformat()}Z",
@@ -588,12 +555,7 @@ Output ONLY valid JSON. No markdown, no code blocks:
     "reasons": ["string", "string"],
     "agent_agreement_score": 0,
     "tv_alert": "TICKER={ticker};TF={tf};SIG=...;ENTRY=...;SL=...;TP1=...;TP2=...;CONF=...",
-    "indicators_used": {{
-        "RSI_14": {primary_indicators.get('RSI_14', 'null')},
-        "MACD_histogram": {primary_indicators.get('MACD_histogram', 'null')},
-        "ATR_14": {primary_indicators.get('ATR_14', 'null')},
-        "ADX": {primary_indicators.get('ADX', 'null')}
-    }}
+    "indicators_used": {{"RSI_14": {primary.get('RSI_14', 'null')}, "MACD_histogram": {primary.get('MACD_histogram', 'null')}, "ATR_14": {primary.get('ATR_14', 'null')}, "ADX": {primary.get('ADX', 'null')}}}
 }}
 """
         signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 600)
