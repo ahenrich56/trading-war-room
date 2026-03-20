@@ -54,7 +54,13 @@ export default function WarRoomDashboard() {
   // Chart + History state
   const [chartData, setChartData] = useState<any>(null);
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
-  const [activeTab, setActiveTab] = useState<"chart" | "history">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus">("chart");
+
+  // Watchlist + Consensus state
+  const [watchlistData, setWatchlistData] = useState<any>(null);
+  const [consensusData, setConsensusData] = useState<any>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isConsensusRunning, setIsConsensusRunning] = useState(false);
 
   // Load chart data
   const loadChartData = useCallback(async (t: string, tf: string) => {
@@ -83,6 +89,44 @@ export default function WarRoomDashboard() {
   }, []);
 
   // Load history on mount
+  // Watchlist scan
+  const scanWatchlist = useCallback(async () => {
+    setIsScanning(true);
+    setActiveTab("watchlist");
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"], timeframe }),
+      });
+      const data = await res.json();
+      setWatchlistData(data);
+    } catch (e) {
+      console.error("Watchlist scan failed:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [timeframe]);
+
+  // Multi-model consensus
+  const runConsensus = useCallback(async () => {
+    setIsConsensusRunning(true);
+    setActiveTab("consensus");
+    try {
+      const res = await fetch("/api/consensus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, timeframe }),
+      });
+      const data = await res.json();
+      setConsensusData(data);
+    } catch (e) {
+      console.error("Consensus failed:", e);
+    } finally {
+      setIsConsensusRunning(false);
+    }
+  }, [ticker, timeframe]);
+
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
@@ -210,6 +254,22 @@ export default function WarRoomDashboard() {
           >
             {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
           </Button>
+          <Button 
+            onClick={scanWatchlist} 
+            disabled={isScanning}
+            variant="outline"
+            className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10 font-bold text-xs"
+          >
+            {isScanning ? "SCANNING..." : "📡 SCAN"}
+          </Button>
+          <Button 
+            onClick={runConsensus} 
+            disabled={isConsensusRunning}
+            variant="outline"
+            className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 font-bold text-xs"
+          >
+            {isConsensusRunning ? "VOTING..." : "🗳️ CONSENSUS"}
+          </Button>
         </div>
       </header>
 
@@ -251,13 +311,45 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              📜 SIGNAL HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
+              📜 HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
+            </button>
+            <button
+              onClick={() => { setActiveTab("watchlist"); if (!watchlistData) scanWatchlist(); }}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "watchlist"
+                  ? "text-purple-400 border-b-2 border-purple-500 bg-purple-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              📡 WATCHLIST
+            </button>
+            <button
+              onClick={() => setActiveTab("consensus")}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "consensus"
+                  ? "text-amber-400 border-b-2 border-amber-500 bg-amber-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              🗳️ CONSENSUS
             </button>
           </div>
 
           {activeTab === "chart" && (
             <div className="p-4">
               <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "watchlist" && (
+            <div className="p-4">
+              <WatchlistPanel data={watchlistData} isScanning={isScanning} onSelect={(t: string) => { setTicker(t); setActiveTab("chart"); loadChartData(t, timeframe); }} />
+            </div>
+          )}
+
+          {activeTab === "consensus" && (
+            <div className="p-4">
+              <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
             </div>
           )}
 
@@ -651,5 +743,181 @@ function AgentCard({ title, data, accent = "white" }: { title: string, data?: st
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ═══ WATCHLIST PANEL ═══
+function WatchlistPanel({ data, isScanning, onSelect }: { data: any, isScanning: boolean, onSelect: (t: string) => void }) {
+  if (isScanning) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-purple-400">
+        <div className="text-center">
+          <div className="text-3xl mb-2 animate-spin">📡</div>
+          <div className="text-sm">Scanning 8 tickers across all indicators...</div>
+          <div className="text-[10px] mt-2 text-slate-600">RSI • MACD • EMA Cross • ADX • Volume</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data?.tickers?.length) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-slate-600">
+        <div className="text-center">
+          <div className="text-3xl mb-2">📡</div>
+          <div className="text-sm">Click SCAN to scan your watchlist</div>
+          <div className="text-[10px] mt-1 text-slate-700">NQ1 • ES1 • AAPL • NVDA • TSLA • BTC • GOLD • AMZN</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-slate-500">
+          Scanned: {new Date(data.scanned_at).toLocaleTimeString()} • {data.timeframe}
+        </span>
+        {data.best_opportunity && (
+          <span className="text-xs text-purple-400">
+            🏆 Best: <strong>{data.best_opportunity.ticker}</strong> (score: {data.best_opportunity.score})
+          </span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {data.tickers.map((t: any, i: number) => (
+          <div
+            key={i}
+            onClick={() => !t.error && onSelect(t.ticker)}
+            className="flex items-center gap-3 p-2.5 bg-black/40 rounded border border-white/5 hover:border-white/20 transition-all cursor-pointer group"
+          >
+            {/* Rank */}
+            <span className="text-[10px] text-slate-600 w-5">#{i + 1}</span>
+
+            {/* Direction badge */}
+            <div className={`px-2 py-0.5 rounded text-[10px] font-black min-w-[60px] text-center ${
+              t.direction === "LONG" ? "bg-green-500/20 text-green-400" :
+              t.direction === "SHORT" ? "bg-red-500/20 text-red-400" :
+              "bg-slate-500/20 text-slate-400"
+            }`}>
+              {t.direction || "ERR"}
+            </div>
+
+            {/* Ticker + Price */}
+            <div className="w-16">
+              <div className="text-white font-bold text-xs group-hover:text-cyan-400 transition-colors">{t.ticker}</div>
+            </div>
+            <div className="text-slate-300 text-xs w-20">${t.price || "—"}</div>
+
+            {/* Score bar */}
+            <div className="flex-1 relative h-4 bg-black/40 rounded overflow-hidden">
+              <div
+                className={`absolute top-0 h-full rounded transition-all ${
+                  t.score > 0 ? "bg-green-500/40 left-1/2" : "bg-red-500/40 right-1/2"
+                }`}
+                style={{ width: `${Math.abs(t.score || 0) / 2}%` }}
+              />
+              <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${
+                t.score > 15 ? "text-green-400" : t.score < -15 ? "text-red-400" : "text-slate-500"
+              }`}>
+                {t.score || 0}
+              </span>
+            </div>
+
+            {/* Quick indicators */}
+            <div className="flex gap-2 text-[10px] text-slate-500 w-48 justify-end">
+              {t.rsi && <span>RSI:{t.rsi}</span>}
+              {t.adx && <span>ADX:{t.adx}</span>}
+              {t.vol_ratio && <span>Vol:{t.vol_ratio}x</span>}
+            </div>
+
+            <span className="text-slate-700 text-xs group-hover:text-cyan-500 transition-colors">→</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══ CONSENSUS PANEL ═══
+function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
+  if (isRunning) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-amber-400">
+        <div className="text-center">
+          <div className="text-3xl mb-2 animate-pulse">🗳️</div>
+          <div className="text-sm">Querying 3 AI models on <span className="text-white font-bold">{ticker}</span>...</div>
+          <div className="text-[10px] mt-2 text-slate-600">GPT-4o-mini • Claude 3.5 Haiku • Gemini 2.0 Flash</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data?.verdicts?.length) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-slate-600">
+        <div className="text-center">
+          <div className="text-3xl mb-2">🗳️</div>
+          <div className="text-sm">Click CONSENSUS to run multi-model voting</div>
+          <div className="text-[10px] mt-1 text-slate-700">3 AI models vote independently on the same signal</div>
+        </div>
+      </div>
+    );
+  }
+
+  const consensusColor = data.consensus === "LONG" ? "text-green-400" : data.consensus === "SHORT" ? "text-red-400" : "text-yellow-400";
+  const consensusBg = data.consensus === "LONG" ? "bg-green-500/20" : data.consensus === "SHORT" ? "bg-red-500/20" : "bg-yellow-500/20";
+
+  return (
+    <div>
+      {/* Consensus Header */}
+      <div className="flex items-center justify-between mb-4 p-3 rounded bg-black/40 border border-white/10">
+        <div>
+          <div className="text-xs text-slate-500">MULTI-MODEL CONSENSUS</div>
+          <div className={`text-2xl font-black tracking-widest ${consensusColor}`}>{data.consensus}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-slate-500">Agreement</div>
+          <div className="text-xl font-bold text-white">{data.agreement} <span className="text-sm text-slate-500">({data.agreement_pct}%)</span></div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-slate-500">Avg. Confidence</div>
+          <div className="text-xl font-bold text-white">{data.avg_confidence}%</div>
+        </div>
+      </div>
+
+      {/* Individual Model Verdicts */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {data.verdicts.map((v: any, i: number) => {
+          const sigColor = v.signal === "LONG" ? "border-green-500/30 bg-green-500/5" : v.signal === "SHORT" ? "border-red-500/30 bg-red-500/5" : "border-slate-500/30 bg-slate-500/5";
+          const sigText = v.signal === "LONG" ? "text-green-400" : v.signal === "SHORT" ? "text-red-400" : "text-yellow-400";
+
+          return (
+            <div key={i} className={`p-3 rounded border ${sigColor}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-slate-500 font-bold">
+                  {v.model === "gpt-4o-mini" ? "🤖 GPT-4o" :
+                   v.model?.includes("claude") ? "🟣 Claude" :
+                   v.model?.includes("gemini") ? "💎 Gemini" : v.model}
+                </span>
+                <span className={`text-xs font-black ${sigText}`}>{v.signal || "?"}</span>
+              </div>
+              <div className="text-xs text-slate-400 space-y-1">
+                {v.confidence !== undefined && <div>Confidence: <span className="text-white">{v.confidence}%</span></div>}
+                {v.entry && <div>Entry: <span className="text-white">{v.entry}</span></div>}
+                {v.stop_loss && <div>SL: <span className="text-red-400">{v.stop_loss}</span></div>}
+                {v.take_profit && <div>TP: <span className="text-green-400">{v.take_profit}</span></div>}
+                {v.reason && <div className="mt-2 text-[10px] text-slate-500 italic">{v.reason}</div>}
+                {v.error && <div className="mt-2 text-[10px] text-red-400">{v.error}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 text-[10px] text-slate-600 text-center">
+        Scanned: {data.scanned_at ? new Date(data.scanned_at).toLocaleTimeString() : "—"} • {data.ticker} on {data.timeframe}
+      </div>
+    </div>
   );
 }

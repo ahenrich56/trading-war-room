@@ -761,7 +761,263 @@ async def get_signal_history(limit: int = 20):
     """Return recent signal history."""
     return {"signals": signal_history[:limit], "total": len(signal_history)}
 
+
+# ═══════════════════════════════════════════════════════════
+#  WATCHLIST SCANNER (Quick-scan multiple tickers)
+# ═══════════════════════════════════════════════════════════
+
+DEFAULT_WATCHLIST = ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"]
+
+class WatchlistRequest(BaseModel):
+    tickers: list[str] = DEFAULT_WATCHLIST
+    timeframe: str = "5m"
+
+def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
+    """Fast indicator-only scan (no AI) for watchlist ranking."""
+    try:
+        yf_symbol = resolve_ticker(ticker)
+        tf_map = {
+            "1m": ("1m", "1d"), "5m": ("5m", "5d"),
+            "15m": ("15m", "5d"), "1h": ("1h", "30d"),
+        }
+        interval, period = tf_map.get(timeframe, ("5m", "5d"))
+
+        tk = yf.Ticker(yf_symbol)
+        df = tk.history(period=period, interval=interval)
+
+        if df.empty or len(df) < 20:
+            return {"ticker": ticker, "error": "No data", "score": 0}
+
+        close = df["Close"]
+        high = df["High"]
+        low = df["Low"]
+        volume = df["Volume"]
+
+        current_price = round(float(close.iloc[-1]), 2)
+        rsi = _rsi(close, 14)
+        macd = _macd(close)
+        atr = _atr(high, low, close, 14)
+        adx = _adx(high, low, close, 14)
+        ema9 = round(float(_ema(close, 9).iloc[-1]), 2)
+        ema21 = round(float(_ema(close, 21).iloc[-1]), 2)
+
+        # Volume ratio
+        avg_vol = volume.rolling(20).mean()
+        vol_ratio = round(float(volume.iloc[-1]) / float(avg_vol.iloc[-1]), 2) if not pd.isna(avg_vol.iloc[-1]) and float(avg_vol.iloc[-1]) > 0 else 1.0
+
+        # VWAP
+        try:
+            vwap = _vwap(high, low, close, volume)
+        except:
+            vwap = current_price
+
+        # Score the opportunity (-100 to +100)
+        score = 0
+        signals = []
+
+        # EMA cross direction
+        if ema9 > ema21:
+            score += 20
+            signals.append("EMA9 > EMA21 (bullish)")
+        else:
+            score -= 20
+            signals.append("EMA9 < EMA21 (bearish)")
+
+        # RSI signals
+        if rsi is not None:
+            if rsi > 70:
+                score -= 15
+                signals.append(f"RSI overbought ({rsi})")
+            elif rsi < 30:
+                score += 15
+                signals.append(f"RSI oversold ({rsi})")
+            elif rsi > 55:
+                score += 10
+                signals.append(f"RSI bullish ({rsi})")
+            elif rsi < 45:
+                score -= 10
+                signals.append(f"RSI bearish ({rsi})")
+
+        # MACD histogram
+        hist = macd.get("MACD_histogram")
+        if hist is not None:
+            if hist > 0:
+                score += 15
+                signals.append(f"MACD histogram positive ({hist})")
+            else:
+                score -= 15
+                signals.append(f"MACD histogram negative ({hist})")
+
+        # ADX trend strength
+        if adx is not None and adx > 25:
+            score = int(score * 1.3)  # Amplify score in strong trends
+            signals.append(f"Strong trend (ADX={adx})")
+        elif adx is not None and adx < 20:
+            score = int(score * 0.5)  # Dampen score in weak trends
+            signals.append(f"Weak trend (ADX={adx})")
+
+        # Volume confirmation
+        if vol_ratio > 1.5:
+            score = int(score * 1.2)
+            signals.append(f"High volume ({vol_ratio}x)")
+
+        # Price vs VWAP
+        if vwap:
+            if current_price > vwap:
+                score += 5
+            else:
+                score -= 5
+
+        # Determine quick direction
+        direction = "LONG" if score > 15 else "SHORT" if score < -15 else "NEUTRAL"
+
+        return {
+            "ticker": ticker,
+            "symbol": yf_symbol,
+            "price": current_price,
+            "direction": direction,
+            "score": max(-100, min(100, score)),
+            "rsi": rsi,
+            "macd_hist": hist,
+            "adx": adx,
+            "ema_cross": "BULLISH" if ema9 > ema21 else "BEARISH",
+            "vol_ratio": vol_ratio,
+            "atr": atr,
+            "signals": signals[:4],
+        }
+
+    except Exception as e:
+        return {"ticker": ticker, "error": str(e), "score": 0}
+
+
+@app.post("/api/v1/watchlist")
+async def watchlist_scan(request: WatchlistRequest):
+    """Scan multiple tickers and rank by signal strength."""
+    loop = asyncio.get_event_loop()
+
+    # Scan all tickers concurrently
+    tasks = [
+        loop.run_in_executor(executor, quick_scan_ticker, t, request.timeframe)
+        for t in request.tickers
+    ]
+    results = await asyncio.gather(*tasks)
+
+    # Sort by absolute score (strongest signals first)
+    results = sorted(results, key=lambda x: abs(x.get("score", 0)), reverse=True)
+
+    # Find the best opportunity
+    best = results[0] if results else None
+
+    return {
+        "tickers": results,
+        "best_opportunity": best,
+        "scanned_at": datetime.utcnow().isoformat() + "Z",
+        "timeframe": request.timeframe,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+#  MULTI-MODEL CONSENSUS
+# ═══════════════════════════════════════════════════════════
+
+CONSENSUS_MODELS = [
+    "gpt-4o-mini",
+    "claude-3-5-haiku-20241022",
+    "gemini-2.0-flash",
+]
+
+async def ask_model(model: str, prompt: str) -> dict:
+    """Query a specific model for a signal verdict."""
+    if not client:
+        return {"model": model, "signal": "NO_TRADE", "confidence": 0, "error": "No API key"}
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            max_tokens=200,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "You are a trading signal engine. Output ONLY valid JSON with keys: signal (LONG/SHORT/NO_TRADE), confidence (0-100), entry (number), stop_loss (number), take_profit (number), reason (string). No markdown."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        text = response.choices[0].message.content
+        clean = text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean)
+        data["model"] = model
+        return data
+    except json.JSONDecodeError:
+        return {"model": model, "signal": "NO_TRADE", "confidence": 0, "error": "JSON parse failed"}
+    except Exception as e:
+        return {"model": model, "signal": "NO_TRADE", "confidence": 0, "error": str(e)[:100]}
+
+
+class ConsensusRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+@app.post("/api/v1/consensus")
+async def multi_model_consensus(request: ConsensusRequest):
+    """Run the same signal prompt through multiple AI models and aggregate."""
+    ticker = request.ticker.upper()
+    tf = request.timeframe
+
+    # Fetch real data for the prompt
+    loop = asyncio.get_event_loop()
+    scan = await loop.run_in_executor(executor, quick_scan_ticker, ticker, tf)
+
+    if "error" in scan:
+        return {"error": scan["error"], "verdicts": [], "consensus": "NO_TRADE"}
+
+    prompt = f"""
+Analyze {ticker} for a {tf} trading signal.
+Current price: {scan['price']}
+RSI(14): {scan.get('rsi', 'N/A')}
+MACD hist: {scan.get('macd_hist', 'N/A')}
+ADX: {scan.get('adx', 'N/A')}
+EMA cross: {scan.get('ema_cross', 'N/A')}
+Volume ratio: {scan.get('vol_ratio', 'N/A')}x
+ATR: {scan.get('atr', 'N/A')}
+
+Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['price']},"stop_loss":0,"take_profit":0,"reason":"string"}}
+"""
+
+    # Query all models concurrently
+    tasks = [ask_model(model, prompt) for model in CONSENSUS_MODELS]
+    verdicts = await asyncio.gather(*tasks)
+
+    # Aggregate consensus
+    signals = [v.get("signal", "NO_TRADE") for v in verdicts]
+    long_count = signals.count("LONG")
+    short_count = signals.count("SHORT")
+    no_trade_count = signals.count("NO_TRADE")
+
+    if long_count >= 2:
+        consensus = "LONG"
+    elif short_count >= 2:
+        consensus = "SHORT"
+    else:
+        consensus = "NO_TRADE"
+
+    avg_confidence = sum(v.get("confidence", 0) for v in verdicts) / max(len(verdicts), 1)
+
+    # Agreement score
+    max_agreement = max(long_count, short_count, no_trade_count)
+    agreement_pct = round((max_agreement / len(verdicts)) * 100)
+
+    return {
+        "ticker": ticker,
+        "timeframe": tf,
+        "consensus": consensus,
+        "agreement": f"{max_agreement}/{len(verdicts)}",
+        "agreement_pct": agreement_pct,
+        "avg_confidence": round(avg_confidence),
+        "verdicts": verdicts,
+        "models_used": CONSENSUS_MODELS,
+        "scanned_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "war-room-ai", "version": "3.0-sprint2"}
-
+    return {"status": "ok", "service": "war-room-ai", "version": "4.0-sprint3"}
