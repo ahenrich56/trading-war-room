@@ -54,13 +54,19 @@ export default function WarRoomDashboard() {
   // Chart + History state
   const [chartData, setChartData] = useState<any>(null);
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
-  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest">("chart");
 
   // Watchlist + Consensus state
   const [watchlistData, setWatchlistData] = useState<any>(null);
   const [consensusData, setConsensusData] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isConsensusRunning, setIsConsensusRunning] = useState(false);
+
+  // ICT + Backtest state
+  const [ictData, setIctData] = useState<any>(null);
+  const [backtestData, setBacktestData] = useState<any>(null);
+  const [isIctRunning, setIsIctRunning] = useState(false);
+  const [isBacktesting, setIsBacktesting] = useState(false);
 
   // Load chart data
   const loadChartData = useCallback(async (t: string, tf: string) => {
@@ -124,6 +130,44 @@ export default function WarRoomDashboard() {
       console.error("Consensus failed:", e);
     } finally {
       setIsConsensusRunning(false);
+    }
+  }, [ticker, timeframe]);
+
+  // ICT Smart Money analysis
+  const runICT = useCallback(async () => {
+    setIsIctRunning(true);
+    setActiveTab("ict");
+    try {
+      const res = await fetch("/api/ict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, timeframe }),
+      });
+      const data = await res.json();
+      setIctData(data);
+    } catch (e) {
+      console.error("ICT analysis failed:", e);
+    } finally {
+      setIsIctRunning(false);
+    }
+  }, [ticker, timeframe]);
+
+  // Backtesting
+  const runBacktest = useCallback(async () => {
+    setIsBacktesting(true);
+    setActiveTab("backtest");
+    try {
+      const res = await fetch("/api/backtest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, timeframe, lookback_days: 5 }),
+      });
+      const data = await res.json();
+      setBacktestData(data);
+    } catch (e) {
+      console.error("Backtest failed:", e);
+    } finally {
+      setIsBacktesting(false);
     }
   }, [ticker, timeframe]);
 
@@ -270,6 +314,22 @@ export default function WarRoomDashboard() {
           >
             {isConsensusRunning ? "VOTING..." : "🗳️ CONSENSUS"}
           </Button>
+          <Button 
+            onClick={runICT} 
+            disabled={isIctRunning}
+            variant="outline"
+            className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs"
+          >
+            {isIctRunning ? "READING..." : "🏦 ICT"}
+          </Button>
+          <Button 
+            onClick={runBacktest} 
+            disabled={isBacktesting}
+            variant="outline"
+            className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 font-bold text-xs"
+          >
+            {isBacktesting ? "TESTING..." : "📈 BACKTEST"}
+          </Button>
         </div>
       </header>
 
@@ -333,6 +393,26 @@ export default function WarRoomDashboard() {
             >
               🗳️ CONSENSUS
             </button>
+            <button
+              onClick={() => { setActiveTab("ict"); if (!ictData) runICT(); }}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "ict"
+                  ? "text-emerald-400 border-b-2 border-emerald-500 bg-emerald-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              🏦 ICT
+            </button>
+            <button
+              onClick={() => { setActiveTab("backtest"); if (!backtestData) runBacktest(); }}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "backtest"
+                  ? "text-orange-400 border-b-2 border-orange-500 bg-orange-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              📈 BACKTEST
+            </button>
           </div>
 
           {activeTab === "chart" && (
@@ -350,6 +430,18 @@ export default function WarRoomDashboard() {
           {activeTab === "consensus" && (
             <div className="p-4">
               <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "ict" && (
+            <div className="p-4">
+              <ICTPanel data={ictData} isRunning={isIctRunning} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "backtest" && (
+            <div className="p-4">
+              <BacktestPanel data={backtestData} isRunning={isBacktesting} ticker={ticker} />
             </div>
           )}
 
@@ -918,6 +1010,210 @@ function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunning: boo
       <div className="mt-3 text-[10px] text-slate-600 text-center">
         Scanned: {data.scanned_at ? new Date(data.scanned_at).toLocaleTimeString() : "—"} • {data.ticker} on {data.timeframe}
       </div>
+    </div>
+  );
+}
+
+// ═══ ICT PANEL ═══
+function ICTPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
+  if (isRunning) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-emerald-400">
+        <div className="text-center">
+          <div className="text-3xl mb-2 animate-pulse">🏦</div>
+          <div className="text-sm">Detecting Smart Money on <span className="text-white font-bold">{ticker}</span>...</div>
+          <div className="text-[10px] mt-2 text-slate-600">CHoCH • BOS • Order Blocks • Fair Value Gaps</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data?.ict || data.error) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-slate-600">
+        <div className="text-center">
+          <div className="text-3xl mb-2">🏦</div>
+          <div className="text-sm">Click ICT to run Smart Money analysis</div>
+          <div className="text-[10px] mt-1 text-slate-700">Market Structure • Order Blocks • FVG Detection</div>
+        </div>
+      </div>
+    );
+  }
+
+  const ict = data.ict;
+  const structColor = ict.market_structure?.includes("BULLISH") ? "text-green-400" : ict.market_structure?.includes("BEARISH") ? "text-red-400" : "text-yellow-400";
+
+  return (
+    <div>
+      {/* Structure Header */}
+      <div className="flex items-center justify-between mb-4 p-3 rounded bg-black/40 border border-white/10">
+        <div>
+          <div className="text-xs text-slate-500">MARKET STRUCTURE</div>
+          <div className={`text-xl font-black tracking-widest ${structColor}`}>{ict.market_structure || "UNKNOWN"}</div>
+        </div>
+        <div className="text-right text-xs text-slate-500">
+          {data.ticker} • {data.timeframe}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Structure Events */}
+        <div className="p-3 rounded border border-emerald-500/20 bg-emerald-500/5">
+          <div className="text-[10px] text-emerald-400 font-bold mb-2">📐 STRUCTURE (BOS/CHoCH)</div>
+          {ict.structure_events?.length ? ict.structure_events.map((e: any, i: number) => (
+            <div key={i} className="mb-1.5">
+              <span className={`text-xs font-bold ${e.direction === "BULLISH" ? "text-green-400" : "text-red-400"}`}>
+                {e.type}: {e.direction}
+              </span>
+              <div className="text-[10px] text-slate-500">{e.detail}</div>
+            </div>
+          )) : <div className="text-[10px] text-slate-600">No structure breaks detected</div>}
+        </div>
+
+        {/* Order Blocks */}
+        <div className="p-3 rounded border border-blue-500/20 bg-blue-500/5">
+          <div className="text-[10px] text-blue-400 font-bold mb-2">🧱 ORDER BLOCKS</div>
+          {ict.order_blocks?.length ? ict.order_blocks.map((ob: any, i: number) => (
+            <div key={i} className="mb-1.5">
+              <span className={`text-xs font-bold ${ob.type.includes("BULLISH") ? "text-green-400" : "text-red-400"}`}>
+                {ob.type}
+              </span>
+              <div className="text-[10px] text-slate-400">Zone: {ob.bottom} — {ob.top}</div>
+            </div>
+          )) : <div className="text-[10px] text-slate-600">No order blocks detected</div>}
+        </div>
+
+        {/* Fair Value Gaps */}
+        <div className="p-3 rounded border border-violet-500/20 bg-violet-500/5">
+          <div className="text-[10px] text-violet-400 font-bold mb-2">📏 FAIR VALUE GAPS</div>
+          {ict.fair_value_gaps?.length ? ict.fair_value_gaps.map((fvg: any, i: number) => (
+            <div key={i} className="mb-1.5">
+              <span className={`text-xs font-bold ${fvg.type.includes("BULLISH") ? "text-green-400" : "text-red-400"}`}>
+                {fvg.type}
+              </span>
+              <div className="text-[10px] text-slate-400">Gap: {fvg.bottom} — {fvg.top} (size: {fvg.size})</div>
+            </div>
+          )) : <div className="text-[10px] text-slate-600">No FVGs detected</div>}
+        </div>
+      </div>
+
+      {/* Key Levels */}
+      <div className="mt-3 flex gap-4">
+        {ict.recent_swing_highs?.length > 0 && (
+          <div className="text-[10px] text-slate-500">
+            🔺 Resistance: <span className="text-red-400 font-bold">{ict.recent_swing_highs.map((s: any) => s.price).join(", ")}</span>
+          </div>
+        )}
+        {ict.recent_swing_lows?.length > 0 && (
+          <div className="text-[10px] text-slate-500">
+            🔻 Support: <span className="text-green-400 font-bold">{ict.recent_swing_lows.map((s: any) => s.price).join(", ")}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══ BACKTEST PANEL ═══
+function BacktestPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
+  if (isRunning) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-orange-400">
+        <div className="text-center">
+          <div className="text-3xl mb-2 animate-spin">📈</div>
+          <div className="text-sm">Backtesting <span className="text-white font-bold">{ticker}</span>...</div>
+          <div className="text-[10px] mt-2 text-slate-600">Replaying signals against historical data</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data || data.error) {
+    return (
+      <div className="h-[350px] flex items-center justify-center text-slate-600">
+        <div className="text-center">
+          <div className="text-3xl mb-2">📈</div>
+          <div className="text-sm">{data?.error || "Click BACKTEST to replay signals"}</div>
+          <div className="text-[10px] mt-1 text-slate-700">Win rate • Sharpe • Max DD • Kelly sizing</div>
+        </div>
+      </div>
+    );
+  }
+
+  const wrColor = data.win_rate >= 60 ? "text-green-400" : data.win_rate >= 45 ? "text-yellow-400" : "text-red-400";
+  const eqColor = data.equity_change_pct >= 0 ? "text-green-400" : "text-red-400";
+  const kelly = data.kelly_optimal_pct || {};
+
+  return (
+    <div>
+      {/* Stats Header */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
+          <div className="text-[10px] text-slate-500">WIN RATE</div>
+          <div className={`text-xl font-black ${wrColor}`}>{data.win_rate}%</div>
+          <div className="text-[10px] text-slate-600">{data.wins}W / {data.losses}L</div>
+        </div>
+        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
+          <div className="text-[10px] text-slate-500">PROFIT FACTOR</div>
+          <div className="text-xl font-black text-white">{data.profit_factor}</div>
+        </div>
+        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
+          <div className="text-[10px] text-slate-500">SHARPE</div>
+          <div className={`text-xl font-black ${data.sharpe_ratio > 1 ? "text-green-400" : "text-yellow-400"}`}>{data.sharpe_ratio}</div>
+        </div>
+        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
+          <div className="text-[10px] text-slate-500">MAX DRAWDOWN</div>
+          <div className="text-xl font-black text-red-400">{data.max_drawdown_pct}%</div>
+        </div>
+        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
+          <div className="text-[10px] text-slate-500">EQUITY</div>
+          <div className={`text-xl font-black ${eqColor}`}>${data.final_equity?.toLocaleString()}</div>
+          <div className={`text-[10px] ${eqColor}`}>{data.equity_change_pct > 0 ? "+" : ""}{data.equity_change_pct}%</div>
+        </div>
+      </div>
+
+      {/* Kelly Criterion */}
+      {kelly.recommended !== undefined && (
+        <div className="mb-4 p-3 rounded bg-black/40 border border-orange-500/20">
+          <div className="text-[10px] text-orange-400 font-bold mb-2">🎯 KELLY CRITERION OPTIMAL SIZING</div>
+          <div className="grid grid-cols-4 gap-3 text-center">
+            <div>
+              <div className="text-[10px] text-slate-500">Full Kelly</div>
+              <div className="text-sm font-bold text-white">{kelly.full_kelly}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500">Half Kelly</div>
+              <div className="text-sm font-bold text-white">{kelly.half_kelly}%</div>
+            </div>
+            <div className="bg-orange-500/10 rounded p-1">
+              <div className="text-[10px] text-orange-400">★ Recommended</div>
+              <div className="text-sm font-black text-orange-400">{kelly.quarter_kelly}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-500">Edge</div>
+              <div className={`text-sm font-bold ${kelly.edge > 0 ? "text-green-400" : "text-red-400"}`}>{kelly.edge}%</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Trades */}
+      {data.trades?.length > 0 && (
+        <div>
+          <div className="text-[10px] text-slate-500 font-bold mb-2">RECENT TRADES ({data.total_trades} total)</div>
+          <div className="space-y-1 max-h-[200px] overflow-y-auto">
+            {data.trades.map((t: any, i: number) => (
+              <div key={i} className="flex items-center gap-3 p-2 bg-black/30 rounded text-xs">
+                <span className={`font-bold min-w-[50px] ${t.direction === "LONG" ? "text-green-400" : "text-red-400"}`}>{t.direction}</span>
+                <span className="text-slate-400">Entry: ${t.entry}</span>
+                <span className="text-slate-400">→ ${t.exit}</span>
+                <span className={`font-black ${t.result === "WIN" ? "text-green-400" : "text-red-400"}`}>{t.result}</span>
+                <span className={`text-[10px] ${t.pnl_pct >= 0 ? "text-green-500" : "text-red-500"}`}>{t.pnl_pct > 0 ? "+" : ""}{t.pnl_pct}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -243,6 +243,187 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     return indicators
 
 
+# ═══════════════════════════════════════════════════════════
+#  ICT / SMART MONEY CONCEPTS (CHoCH, BOS, Order Blocks, FVG)
+# ═══════════════════════════════════════════════════════════
+
+def _detect_swing_points(high: pd.Series, low: pd.Series, lookback: int = 5) -> dict:
+    """Detect swing highs and swing lows for structural analysis."""
+    swing_highs = []
+    swing_lows = []
+
+    for i in range(lookback, len(high) - lookback):
+        # Swing High: highest point within lookback window
+        if high.iloc[i] == high.iloc[i - lookback:i + lookback + 1].max():
+            swing_highs.append({"index": i, "price": round(float(high.iloc[i]), 2)})
+        # Swing Low: lowest point within lookback window
+        if low.iloc[i] == low.iloc[i - lookback:i + lookback + 1].min():
+            swing_lows.append({"index": i, "price": round(float(low.iloc[i]), 2)})
+
+    return {"swing_highs": swing_highs[-8:], "swing_lows": swing_lows[-8:]}
+
+
+def _detect_structure(high: pd.Series, low: pd.Series, lookback: int = 5) -> list:
+    """Detect Break of Structure (BOS) and Change of Character (CHoCH)."""
+    swings = _detect_swing_points(high, low, lookback)
+    events = []
+
+    # Track structure: Higher Highs/Higher Lows = uptrend, Lower Highs/Lower Lows = downtrend
+    shs = swings["swing_highs"]
+    sls = swings["swing_lows"]
+
+    # Detect BOS / CHoCH from recent swing points
+    if len(shs) >= 2 and len(sls) >= 2:
+        last_sh = shs[-1]["price"]
+        prev_sh = shs[-2]["price"]
+        last_sl = sls[-1]["price"]
+        prev_sl = sls[-2]["price"]
+
+        # BOS: continuation of structure
+        if last_sh > prev_sh and last_sl > prev_sl:
+            events.append({"type": "BOS", "direction": "BULLISH", "level": last_sh, "detail": f"Higher High at {last_sh}, Higher Low at {last_sl}"})
+        elif last_sh < prev_sh and last_sl < prev_sl:
+            events.append({"type": "BOS", "direction": "BEARISH", "level": last_sl, "detail": f"Lower Low at {last_sl}, Lower High at {last_sh}"})
+
+        # CHoCH: reversal of structure
+        if last_sh > prev_sh and last_sl < prev_sl:
+            events.append({"type": "CHoCH", "direction": "BULLISH", "level": last_sh, "detail": f"Broke previous high {prev_sh} → reversal up"})
+        elif last_sh < prev_sh and last_sl > prev_sl:
+            events.append({"type": "CHoCH", "direction": "BEARISH", "level": last_sl, "detail": f"Broke previous low {prev_sl} → reversal down"})
+
+    return events
+
+
+def _detect_order_blocks(df: pd.DataFrame, lookback: int = 20) -> list:
+    """Detect bullish and bearish order blocks (last candle before a strong move)."""
+    obs = []
+    close = df["Close"]
+    openp = df["Open"]
+    high = df["High"]
+    low = df["Low"]
+
+    for i in range(max(1, len(df) - lookback), len(df) - 1):
+        body = abs(float(close.iloc[i + 1]) - float(openp.iloc[i + 1]))
+        avg_body = abs(close - openp).rolling(10).mean()
+        if len(avg_body) > i and not pd.isna(avg_body.iloc[i]):
+            threshold = float(avg_body.iloc[i]) * 2
+
+            # Bullish OB: bearish candle followed by strong bullish candle
+            if float(close.iloc[i]) < float(openp.iloc[i]) and body > threshold and float(close.iloc[i + 1]) > float(openp.iloc[i + 1]):
+                obs.append({
+                    "type": "BULLISH_OB",
+                    "top": round(float(openp.iloc[i]), 2),
+                    "bottom": round(float(close.iloc[i]), 2),
+                    "index": i,
+                })
+
+            # Bearish OB: bullish candle followed by strong bearish candle
+            if float(close.iloc[i]) > float(openp.iloc[i]) and body > threshold and float(close.iloc[i + 1]) < float(openp.iloc[i + 1]):
+                obs.append({
+                    "type": "BEARISH_OB",
+                    "top": round(float(close.iloc[i]), 2),
+                    "bottom": round(float(openp.iloc[i]), 2),
+                    "index": i,
+                })
+
+    return obs[-4:]  # Return last 4 order blocks
+
+
+def _detect_fvg(df: pd.DataFrame, lookback: int = 20) -> list:
+    """Detect Fair Value Gaps (3-candle imbalances)."""
+    fvgs = []
+    high = df["High"]
+    low = df["Low"]
+
+    for i in range(max(2, len(df) - lookback), len(df)):
+        h1 = float(high.iloc[i - 2])
+        l3 = float(low.iloc[i])
+        h3 = float(high.iloc[i])
+        l1 = float(low.iloc[i - 2])
+
+        # Bullish FVG: gap between candle 1 high and candle 3 low
+        if l3 > h1:
+            fvgs.append({
+                "type": "BULLISH_FVG",
+                "top": round(l3, 2),
+                "bottom": round(h1, 2),
+                "size": round(l3 - h1, 2),
+            })
+
+        # Bearish FVG: gap between candle 3 high and candle 1 low
+        if h3 < l1:
+            fvgs.append({
+                "type": "BEARISH_FVG",
+                "top": round(l1, 2),
+                "bottom": round(h3, 2),
+                "size": round(l1 - h3, 2),
+            })
+
+    return fvgs[-4:]  # Return last 4 FVGs
+
+
+def detect_ict_concepts(df: pd.DataFrame) -> dict:
+    """Run all ICT/SMC detection algorithms on OHLCV data."""
+    if df.empty or len(df) < 20:
+        return {"error": "Insufficient data for ICT analysis"}
+
+    try:
+        high = df["High"]
+        low = df["Low"]
+
+        swings = _detect_swing_points(high, low)
+        structure = _detect_structure(high, low)
+        order_blocks = _detect_order_blocks(df)
+        fvgs = _detect_fvg(df)
+
+        # Determine current market structure
+        if structure:
+            last_event = structure[-1]
+            market_structure = f"{last_event['direction']} {last_event['type']}"
+        else:
+            market_structure = "RANGING"
+
+        return {
+            "market_structure": market_structure,
+            "structure_events": structure,
+            "order_blocks": order_blocks,
+            "fair_value_gaps": fvgs,
+            "recent_swing_highs": swings["swing_highs"][-3:],
+            "recent_swing_lows": swings["swing_lows"][-3:],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def format_ict_for_ai(ict_data: dict) -> str:
+    """Format ICT concepts into AI-readable text."""
+    if "error" in ict_data:
+        return f"ICT Analysis: {ict_data['error']}"
+
+    lines = ["═══ ICT / SMART MONEY CONCEPTS ═══"]
+    lines.append(f"  Market Structure: {ict_data.get('market_structure', 'Unknown')}")
+
+    for evt in ict_data.get("structure_events", []):
+        lines.append(f"  {evt['type']}: {evt['direction']} — {evt['detail']}")
+
+    for ob in ict_data.get("order_blocks", []):
+        lines.append(f"  {ob['type']}: Zone {ob['bottom']}-{ob['top']}")
+
+    for fvg in ict_data.get("fair_value_gaps", []):
+        lines.append(f"  {fvg['type']}: Gap {fvg['bottom']}-{fvg['top']} (size: {fvg['size']})")
+
+    shs = ict_data.get("recent_swing_highs", [])
+    sls = ict_data.get("recent_swing_lows", [])
+    if shs:
+        lines.append(f"  Key Resistance (Swing Highs): {', '.join(str(s['price']) for s in shs)}")
+    if sls:
+        lines.append(f"  Key Support (Swing Lows): {', '.join(str(s['price']) for s in sls)}")
+
+    return "\n".join(lines)
+
+
+
+
 def format_indicators_for_ai(indicators: dict, label: str) -> str:
     if "error" in indicators:
         return f"[{label}] {indicators['error']}"
@@ -291,6 +472,7 @@ def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
     configs = TIMEFRAME_CONFIG.get(primary_tf, TIMEFRAME_CONFIG["5m"])
 
     results = {}
+    dataframes = {}
     bars_data = None
 
     for interval, period, label in configs:
@@ -302,6 +484,7 @@ def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
                 continue
 
             results[label] = compute_indicators(df)
+            dataframes[interval] = df  # Store raw DF for ICT
 
             if interval == primary_tf or bars_data is None:
                 recent = df.tail(10)
@@ -317,7 +500,7 @@ def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
         except Exception as e:
             results[label] = {"error": str(e)}
 
-    return {"indicators": results, "bars": bars_data or [], "symbol": yf_symbol}
+    return {"indicators": results, "bars": bars_data or [], "symbol": yf_symbol, "dataframes": dataframes}
 
 
 def build_mtf_summary(mtf_data: dict, ticker: str) -> str:
@@ -463,7 +646,15 @@ async def generate_analysis_stream(req: AnalysisRequest):
         primary = list(mtf_data["indicators"].values())[0] if mtf_data["indicators"] else {}
         current_price = primary.get("current_price", "UNKNOWN")
 
-        full_data = f"{mtf_summary}\n\n{market_context}\n\n{econ_calendar}"
+        # ICT / Smart Money Concepts from primary timeframe
+        primary_df = mtf_data.get("dataframes", {}).get(tf) if "dataframes" in mtf_data else None
+        ict_data = {}
+        ict_text = ""
+        if primary_df is not None and not primary_df.empty:
+            ict_data = detect_ict_concepts(primary_df)
+            ict_text = format_ict_for_ai(ict_data)
+
+        full_data = f"{mtf_summary}\n\n{ict_text}\n\n{market_context}\n\n{econ_calendar}"
 
         price_anchor = (
             f"\nCRITICAL: CURRENT LIVE PRICE of {ticker} is {current_price}. "
@@ -475,7 +666,7 @@ async def generate_analysis_stream(req: AnalysisRequest):
             "FUNDAMENTAL_ANALYST": f"Analyze {ticker} fundamentals. Price: {current_price}.\n{mtf_summary}\n{market_context}",
             "SENTIMENT_ANALYST": f"Analyze sentiment for {ticker}. Price: {current_price}. Vol ratio: {primary.get('volume_ratio', 'N/A')}x. RSI: {primary.get('RSI_14', 'N/A')}.\n{market_context}",
             "NEWS_ANALYST": f"Analyze macro factors for {ticker}. Price: {current_price}.\n{market_context}\n{econ_calendar}",
-            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators below. Reference exact values.\n{mtf_summary}{price_anchor}",
+            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators AND Smart Money Concepts below. Reference exact values, mention structure (BOS/CHoCH), order blocks, and FVGs.\n{mtf_summary}\n{ict_text}{price_anchor}",
         }
 
         analyst_outputs = {}
@@ -1018,6 +1209,281 @@ Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['
     }
 
 
+# ═══════════════════════════════════════════════════════════
+#  ICT ENDPOINT
+# ═══════════════════════════════════════════════════════════
+
+class ICTRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+@app.post("/api/v1/ict")
+async def ict_endpoint(request: ICTRequest):
+    """Return ICT/Smart Money Concepts analysis for a ticker."""
+    ticker = request.ticker.upper()
+    yf_symbol = resolve_ticker(ticker)
+    tf_map = {
+        "1m": ("1m", "1d"), "5m": ("5m", "5d"),
+        "15m": ("15m", "5d"), "1h": ("1h", "30d"),
+    }
+    interval, period = tf_map.get(request.timeframe, ("5m", "5d"))
+
+    try:
+        tk = yf.Ticker(yf_symbol)
+        df = tk.history(period=period, interval=interval)
+        if df.empty:
+            return {"error": "No data", "ict": {}}
+
+        ict_data = detect_ict_concepts(df)
+        return {"ticker": ticker, "timeframe": request.timeframe, "ict": ict_data}
+    except Exception as e:
+        return {"error": str(e), "ict": {}}
+
+
+# ═══════════════════════════════════════════════════════════
+#  BACKTESTING ENGINE
+# ═══════════════════════════════════════════════════════════
+
+class BacktestRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+    lookback_days: int = 5
+
+def run_backtest(ticker: str, timeframe: str, lookback_days: int) -> dict:
+    """Replay signal scoring against historical data and calculate performance."""
+    yf_symbol = resolve_ticker(ticker)
+    tf_map = {
+        "1m": ("1m", "1d"), "5m": ("5m", f"{lookback_days}d"),
+        "15m": ("15m", f"{lookback_days}d"), "1h": ("1h", f"{lookback_days}d"),
+    }
+    interval, period = tf_map.get(timeframe, ("5m", f"{lookback_days}d"))
+
+    try:
+        tk = yf.Ticker(yf_symbol)
+        df = tk.history(period=period, interval=interval)
+
+        if df.empty or len(df) < 50:
+            return {"error": "Insufficient data for backtest"}
+
+        trades = []
+        equity_curve = [10000]  # Start with $10k
+        current_idx = 30  # Start after warmup period
+
+        while current_idx < len(df) - 10:
+            window = df.iloc[:current_idx + 1]
+            close = window["Close"]
+            high = window["High"]
+            low = window["Low"]
+            volume = window["Volume"]
+
+            # Quick indicator scoring (same as watchlist scanner)
+            rsi = _rsi(close, 14)
+            macd = _macd(close)
+            ema9 = float(_ema(close, 9).iloc[-1])
+            ema21 = float(_ema(close, 21).iloc[-1])
+            atr = _atr(high, low, close, 14) or 1
+
+            score = 0
+            if ema9 > ema21: score += 20
+            else: score -= 20
+            if rsi and rsi > 70: score -= 15
+            elif rsi and rsi < 30: score += 15
+            elif rsi and rsi > 55: score += 10
+            elif rsi and rsi < 45: score -= 10
+            hist = macd.get("MACD_histogram")
+            if hist and hist > 0: score += 15
+            elif hist: score -= 15
+
+            # Only trade if score is strong enough
+            if abs(score) > 20:
+                direction = "LONG" if score > 0 else "SHORT"
+                entry_price = float(close.iloc[-1])
+                sl = entry_price - (1.5 * atr) if direction == "LONG" else entry_price + (1.5 * atr)
+                tp = entry_price + (2 * atr) if direction == "LONG" else entry_price - (2 * atr)
+
+                # Simulate: check next 10 bars
+                future = df.iloc[current_idx + 1:current_idx + 11]
+                result = "OPEN"
+                exit_price = entry_price
+                for _, bar in future.iterrows():
+                    h = float(bar["High"])
+                    l = float(bar["Low"])
+                    if direction == "LONG":
+                        if l <= sl: result = "LOSS"; exit_price = sl; break
+                        if h >= tp: result = "WIN"; exit_price = tp; break
+                    else:
+                        if h >= sl: result = "LOSS"; exit_price = sl; break
+                        if l <= tp: result = "WIN"; exit_price = tp; break
+
+                if result == "OPEN":
+                    exit_price = float(future["Close"].iloc[-1]) if len(future) > 0 else entry_price
+                    pnl = exit_price - entry_price if direction == "LONG" else entry_price - exit_price
+                    result = "WIN" if pnl > 0 else "LOSS"
+
+                pnl = exit_price - entry_price if direction == "LONG" else entry_price - exit_price
+                pnl_pct = round((pnl / entry_price) * 100, 3)
+
+                trades.append({
+                    "direction": direction,
+                    "entry": round(entry_price, 2),
+                    "exit": round(exit_price, 2),
+                    "sl": round(sl, 2),
+                    "tp": round(tp, 2),
+                    "result": result,
+                    "pnl_pct": pnl_pct,
+                    "score": score,
+                })
+
+                # Update equity
+                pos_size = equity_curve[-1] * 0.02  # 2% risk
+                dollar_pnl = pos_size * (pnl_pct / 100)
+                equity_curve.append(round(equity_curve[-1] + dollar_pnl, 2))
+
+                current_idx += 10  # Skip forward after trade
+            else:
+                current_idx += 5  # Skip forward if no signal
+
+        # Calculate stats
+        wins = [t for t in trades if t["result"] == "WIN"]
+        losses = [t for t in trades if t["result"] == "LOSS"]
+        total = len(trades)
+        win_rate = round(len(wins) / total * 100, 1) if total > 0 else 0
+
+        avg_win = round(sum(t["pnl_pct"] for t in wins) / len(wins), 3) if wins else 0
+        avg_loss = round(sum(abs(t["pnl_pct"]) for t in losses) / len(losses), 3) if losses else 0
+        profit_factor = round(sum(t["pnl_pct"] for t in wins) / sum(abs(t["pnl_pct"]) for t in losses), 2) if losses and sum(abs(t["pnl_pct"]) for t in losses) > 0 else 999
+
+        # Max drawdown
+        peak = equity_curve[0]
+        max_dd = 0
+        for eq in equity_curve:
+            if eq > peak: peak = eq
+            dd = (peak - eq) / peak * 100
+            if dd > max_dd: max_dd = dd
+
+        # Sharpe ratio (simplified)
+        returns = [trades[i]["pnl_pct"] for i in range(len(trades))]
+        if len(returns) > 1:
+            avg_ret = sum(returns) / len(returns)
+            std_ret = (sum((r - avg_ret) ** 2 for r in returns) / len(returns)) ** 0.5
+            sharpe = round(avg_ret / std_ret, 2) if std_ret > 0 else 0
+        else:
+            sharpe = 0
+
+        return {
+            "ticker": ticker,
+            "timeframe": timeframe,
+            "total_trades": total,
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": win_rate,
+            "avg_win_pct": avg_win,
+            "avg_loss_pct": avg_loss,
+            "profit_factor": profit_factor,
+            "sharpe_ratio": sharpe,
+            "max_drawdown_pct": round(max_dd, 2),
+            "final_equity": equity_curve[-1],
+            "equity_change_pct": round((equity_curve[-1] - 10000) / 100, 2),
+            "trades": trades[-10:],  # Last 10 trades
+            "kelly_optimal_pct": calculate_kelly(win_rate / 100, avg_win, avg_loss),
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+#  KELLY CRITERION POSITION SIZING
+# ═══════════════════════════════════════════════════════════
+
+def calculate_kelly(win_rate: float, avg_win: float, avg_loss: float) -> dict:
+    """Calculate Kelly Criterion optimal position size."""
+    if avg_loss == 0 or win_rate == 0:
+        return {"full_kelly": 0, "half_kelly": 0, "quarter_kelly": 0, "recommended": 0}
+
+    b = avg_win / avg_loss  # win/loss ratio
+    p = win_rate
+    q = 1 - p
+
+    full = round((b * p - q) / b * 100, 2)
+    if full < 0:
+        full = 0
+
+    return {
+        "full_kelly": full,
+        "half_kelly": round(full / 2, 2),
+        "quarter_kelly": round(full / 4, 2),
+        "recommended": round(full / 4, 2),  # Quarter Kelly is safest
+        "win_rate": round(win_rate * 100, 1),
+        "avg_rr": round(b, 2),
+        "edge": round((b * p - q) * 100, 2),
+    }
+
+
+@app.post("/api/v1/backtest")
+async def backtest_endpoint(request: BacktestRequest):
+    """Run a backtest against historical data."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, run_backtest, request.ticker, request.timeframe, request.lookback_days)
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
+#  AI SELF-LEARNING LOOP
+# ═══════════════════════════════════════════════════════════
+
+# Outcome tracker — stores resolved signal outcomes
+outcome_history: list[dict] = []
+MAX_OUTCOMES = 100
+
+class OutcomeReport(BaseModel):
+    ticker: str
+    signal: str
+    entry: float
+    result: str  # WIN or LOSS
+    pnl_pct: float
+    notes: str = ""
+
+@app.post("/api/v1/outcomes/report")
+async def report_outcome(report: OutcomeReport):
+    """Report a signal outcome for the self-learning loop."""
+    outcome = {
+        **report.dict(),
+        "reported_at": datetime.utcnow().isoformat() + "Z",
+    }
+    outcome_history.insert(0, outcome)
+    if len(outcome_history) > MAX_OUTCOMES:
+        outcome_history[:] = outcome_history[:MAX_OUTCOMES]
+    return {"status": "recorded", "total_outcomes": len(outcome_history)}
+
+@app.get("/api/v1/outcomes")
+async def get_outcomes():
+    """Get outcome history and performance stats for the self-learning prompt."""
+    total = len(outcome_history)
+    wins = sum(1 for o in outcome_history if o["result"] == "WIN")
+    losses = sum(1 for o in outcome_history if o["result"] == "LOSS")
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0
+
+    # Build self-learning context string for AI
+    if total >= 5:
+        recent = outcome_history[:10]
+        context = f"SELF-LEARNING: {wins}W/{losses}L ({win_rate}% win rate) from {total} signals.\n"
+        for o in recent:
+            context += f"  {o['ticker']} {o['signal']} → {o['result']} ({o['pnl_pct']}%)\n"
+    else:
+        context = "SELF-LEARNING: Insufficient outcome data (<5 signals tracked)."
+
+    return {
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "outcomes": outcome_history[:20],
+        "learning_context": context,
+    }
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "war-room-ai", "version": "4.0-sprint3"}
+    return {"status": "ok", "service": "war-room-ai", "version": "5.0-sprint4"}
+
