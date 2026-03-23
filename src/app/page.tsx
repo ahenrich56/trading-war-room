@@ -7,24 +7,18 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SignalPayload } from "@/components/types";
+import { MiniChart } from "@/components/MiniChart";
+import { AgentCard } from "@/components/AgentCard";
+import { WatchlistPanel } from "@/components/WatchlistPanel";
+import { ConsensusPanel } from "@/components/ConsensusPanel";
+import { ICTPanel } from "@/components/ICTPanel";
+import { BacktestPanel } from "@/components/BacktestPanel";
+import { TermTooltip } from "@/components/TermTooltip";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
-// Signal payload
-interface SignalPayload {
-  ticker: string;
-  timeframe: string;
-  signal: string;
-  entry_zone: { min: number; max: number };
-  stop_loss: number;
-  take_profit: { level: number; price: number }[];
-  confidence: number;
-  risk_reward: number;
-  position_size_pct: number;
-  reasons: string[];
-  tv_alert: string;
-  market_regime?: string;
-  timestamp_utc?: string;
-  indicators_used?: Record<string, number | null>;
-}
+
 
 const ALL_STAGES = [
   "FUNDAMENTAL_ANALYST",
@@ -46,6 +40,8 @@ export default function WarRoomDashboard() {
   const [isRunning, setIsRunning] = useState(false);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [backendStatus, setBackendStatus] = useState<"ok" | "error" | "checking">("checking");
+  const [demoMode, setDemoMode] = useState(false);
 
   const [agentData, setAgentData] = useState<Record<string, any>>({});
   const [signal, setSignal] = useState<SignalPayload | null>(null);
@@ -54,7 +50,7 @@ export default function WarRoomDashboard() {
   // Chart + History state
   const [chartData, setChartData] = useState<any>(null);
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
-  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest" | "outcomes">("chart");
 
   // Watchlist + Consensus state
   const [watchlistData, setWatchlistData] = useState<any>(null);
@@ -67,6 +63,60 @@ export default function WarRoomDashboard() {
   const [backtestData, setBacktestData] = useState<any>(null);
   const [isIctRunning, setIsIctRunning] = useState(false);
   const [isBacktesting, setIsBacktesting] = useState(false);
+
+  // Poll backend health
+  useEffect(() => {
+    let isMounted = true;
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("/api/health");
+        if (isMounted) {
+          setBackendStatus(res.ok ? "ok" : "error");
+        }
+      } catch (e) {
+        if (isMounted) setBackendStatus("error");
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000); // Check every 30s
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Outcome tracking state
+  const [outcomesData, setOutcomesData] = useState<any>(null);
+
+  // Toast notifications
+  const [toasts, setToasts] = useState<{id: number; message: string; type: "success" | "error" | "info"}[]>([]);
+  const toastIdRef = useRef(0);
+
+  // Customizable watchlist
+  const [watchlistTickers, setWatchlistTickers] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("warroom_watchlist");
+      return saved ? JSON.parse(saved) : ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"];
+    }
+    return ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"];
+  });
+  const [newWatchlistTicker, setNewWatchlistTicker] = useState("");
+
+  // Abort controller for cancellation
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const addToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  }, []);
+
+  // Save watchlist to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("warroom_watchlist", JSON.stringify(watchlistTickers));
+    }
+  }, [watchlistTickers]);
 
   // Load chart data
   const loadChartData = useCallback(async (t: string, tf: string) => {
@@ -83,6 +133,25 @@ export default function WarRoomDashboard() {
     }
   }, []);
 
+  // Auto-refresh chart when ticker changes (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (ticker.length >= 1) loadChartData(ticker, timeframe);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [ticker, timeframe, loadChartData]);
+
+  // Load outcomes data
+  const loadOutcomes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/outcomes");
+      const data = await res.json();
+      setOutcomesData(data);
+    } catch (e) {
+      console.error("Failed to load outcomes:", e);
+    }
+  }, []);
+
   // Load signal history
   const loadHistory = useCallback(async () => {
     try {
@@ -94,8 +163,7 @@ export default function WarRoomDashboard() {
     }
   }, []);
 
-  // Load history on mount
-  // Watchlist scan
+  // Watchlist scan (uses customizable tickers)
   const scanWatchlist = useCallback(async () => {
     setIsScanning(true);
     setActiveTab("watchlist");
@@ -103,16 +171,83 @@ export default function WarRoomDashboard() {
       const res = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"], timeframe }),
+        body: JSON.stringify({ tickers: watchlistTickers, timeframe }),
       });
       const data = await res.json();
       setWatchlistData(data);
+      addToast(`Scanned ${watchlistTickers.length} tickers`, "success");
     } catch (e) {
-      console.error("Watchlist scan failed:", e);
+      addToast("Watchlist scan failed", "error");
     } finally {
       setIsScanning(false);
     }
-  }, [timeframe]);
+  }, [timeframe, watchlistTickers, addToast]);
+
+  // ═══ DEMO MODE MOCK PIPELINE ═══
+  const runDemoPipeline = useCallback(async () => {
+    setIsRunning(true);
+    setError(null);
+    setAgentData({});
+    setSignal(null);
+    setActiveTab("chart");
+    
+    try {
+      // Fake chart data
+      const mockChartUrl = "https://raw.githubusercontent.com/tradingview/lightweight-charts/master/plugin-examples/data.json";
+      const res = await fetch(mockChartUrl);
+      const rawData = await res.json();
+      // Adjust timestamps and format slightly for our display
+      const cData = {
+        ohlcv: rawData.slice(-100).map((d: any) => ({
+          time: new Date(d.time).getTime() / 1000,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+          volume: Math.random() * 1000 + 500
+        }))
+      };
+      setChartData(cData);
+      
+      const stages = [...ALL_STAGES];
+      setProgress(0);
+      
+      let mockAgents = {} as Record<string, string>;
+      for (let i = 0; i < stages.length; i++) {
+        const stage = stages[i];
+        setCurrentStage(stage);
+        await new Promise(r => setTimeout(r, 600)); // Sim delay
+        
+        mockAgents[stage] = `[DEMO MODE] The ${stage} indicates favorable conditions for a long entry in the current market regime based on simulated metrics.`;
+        setAgentData({ ...mockAgents });
+        setProgress(Math.round(((i + 1) / stages.length) * 100));
+      }
+      
+      const lastClose = cData.ohlcv[cData.ohlcv.length - 1].close;
+      setSignal({
+        ticker,
+        timeframe,
+        signal: "LONG",
+        entry_zone: { min: lastClose - 2, max: lastClose + 1 },
+        stop_loss: lastClose - 5,
+        take_profit: [{ level: 1, price: lastClose + 10 }],
+        confidence: 85,
+        risk_reward: 2.0,
+        position_size_pct: 2,
+        reasons: ["Strong demo momentum", "Simulated breakout"],
+        tv_alert: "DEMO_ALERT",
+        timestamp_utc: new Date().toISOString()
+      });
+      
+      addToast("Demo analysis complete", "success");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setIsRunning(false);
+      setProgress(100);
+      setCurrentStage("COMPLETE");
+    }
+  }, [ticker, timeframe, addToast]);
 
   // Multi-model consensus
   const runConsensus = useCallback(async () => {
@@ -126,12 +261,13 @@ export default function WarRoomDashboard() {
       });
       const data = await res.json();
       setConsensusData(data);
+      addToast("Consensus analysis complete", "success");
     } catch (e) {
-      console.error("Consensus failed:", e);
+      addToast("Consensus analysis failed", "error");
     } finally {
       setIsConsensusRunning(false);
     }
-  }, [ticker, timeframe]);
+  }, [ticker, timeframe, addToast]);
 
   // ICT Smart Money analysis
   const runICT = useCallback(async () => {
@@ -145,12 +281,13 @@ export default function WarRoomDashboard() {
       });
       const data = await res.json();
       setIctData(data);
+      addToast("ICT analysis complete", "success");
     } catch (e) {
-      console.error("ICT analysis failed:", e);
+      addToast("ICT analysis failed", "error");
     } finally {
       setIsIctRunning(false);
     }
-  }, [ticker, timeframe]);
+  }, [ticker, timeframe, addToast]);
 
   // Backtesting
   const runBacktest = useCallback(async () => {
@@ -164,16 +301,49 @@ export default function WarRoomDashboard() {
       });
       const data = await res.json();
       setBacktestData(data);
+      addToast("Backtest complete", "success");
     } catch (e) {
-      console.error("Backtest failed:", e);
+      addToast("Backtest failed", "error");
     } finally {
       setIsBacktesting(false);
     }
-  }, [ticker, timeframe]);
+  }, [ticker, timeframe, addToast]);
 
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Report outcome (WIN/LOSS)
+  const reportOutcome = useCallback(async (sig: SignalPayload, result: "WIN" | "LOSS", pnl: number) => {
+    try {
+      await fetch("/api/outcomes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: sig.ticker,
+          signal: sig.signal,
+          entry: sig.entry_zone?.min || 0,
+          result,
+          pnl_pct: pnl,
+        }),
+      });
+      addToast(`Outcome reported: ${result}`, "success");
+      loadOutcomes();
+    } catch (e) {
+      addToast("Failed to report outcome", "error");
+    }
+  }, [addToast, loadOutcomes]);
+
+  // Cancel running analysis
+  const cancelAnalysis = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsRunning(false);
+      setCurrentStage("CANCELLED");
+      addToast("Analysis cancelled", "info");
+    }
+  }, [addToast]);
 
   const runAnalysis = async () => {
     setIsRunning(true);
@@ -183,6 +353,9 @@ export default function WarRoomDashboard() {
     setCurrentStage(ALL_STAGES[0]);
     setProgress(0);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     // Also fetch chart data in parallel
     loadChartData(ticker, timeframe);
 
@@ -191,6 +364,7 @@ export default function WarRoomDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker, timeframe, riskProfile }),
+        signal: controller.signal,
       });
 
       if (!response.body) throw new Error("No readable stream");
@@ -242,12 +416,16 @@ export default function WarRoomDashboard() {
       }
       // Reload history after analysis
       loadHistory();
+      addToast(`Analysis complete for ${ticker}`, "success");
     } catch (err: any) {
+      if (err.name === "AbortError") return; // User cancelled
       setError(err.message || "Failed to run analysis");
+      addToast(err.message || "Analysis failed", "error");
     } finally {
       setIsRunning(false);
       setProgress(100);
       setCurrentStage("COMPLETE");
+      abortControllerRef.current = null;
     }
   };
 
@@ -256,22 +434,44 @@ export default function WarRoomDashboard() {
       <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
 
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-b from-slate-900 to-slate-950 backdrop-blur-md px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-3 w-3 rounded-full bg-cyan-500 animate-pulse" />
-          <h1 className="text-xl font-bold text-white tracking-wider">AI TRADING WAR ROOM</h1>
-          <Badge variant="outline" className="text-cyan-400 border-cyan-500/30 bg-cyan-500/5 text-[10px]">v3.0</Badge>
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-b from-slate-900 to-slate-950 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center justify-between mb-3 sm:mb-0">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div 
+              className={`h-3 w-3 rounded-full ${
+                backendStatus === "ok" ? "bg-cyan-500 animate-pulse" : 
+                backendStatus === "checking" ? "bg-amber-500 animate-pulse" : 
+                "bg-red-500"
+              }`} 
+              title={backendStatus === "ok" ? "Backend connected" : backendStatus === "checking" ? "Checking connection..." : "Backend offline"}
+            />
+            <h1 className="text-base sm:text-xl font-bold text-white tracking-wider flex items-center gap-2">
+              AI TRADING WAR ROOM
+              {backendStatus === "error" && (
+                <span className="text-xs text-red-500 font-normal uppercase tracking-normal hidden sm:inline">(Offline)</span>
+              )}
+            </h1>
+            <Badge variant="outline" className="text-cyan-400 border-cyan-500/30 bg-cyan-500/5 text-[10px]">v3.0</Badge>
+          </div>
         </div>
         
-        <div className="flex gap-4 items-center">
+        <div className="flex flex-wrap gap-2 sm:gap-4 items-center">
+          <div className="flex items-center space-x-2 mr-4 bg-slate-900 border border-white/10 px-3 py-1.5 rounded-md">
+            <Switch id="demo-mode" checked={demoMode} onCheckedChange={setDemoMode} />
+            <Label htmlFor="demo-mode" className="text-xs text-slate-300 font-bold cursor-pointer hover:text-cyan-400 transition-colors">
+              <TermTooltip term="Demo Mode" description="Uses simulated offline data for testing UI without backend API keys.">
+                DEMO DATA
+              </TermTooltip>
+            </Label>
+          </div>
           <Input 
             value={ticker} 
             onChange={e => setTicker(e.target.value.toUpperCase())}
             placeholder="TICKER" 
-            className="w-24 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold"
+            className="w-20 sm:w-24 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold text-xs sm:text-sm"
           />
           <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
-            <SelectTrigger className="w-24 bg-black/50 border-white/20">
+            <SelectTrigger className="w-20 sm:w-24 bg-black/50 border-white/20 text-xs sm:text-sm">
               <SelectValue placeholder="TF" />
             </SelectTrigger>
             <SelectContent className="bg-slate-900 border-white/20 text-white">
@@ -282,7 +482,7 @@ export default function WarRoomDashboard() {
             </SelectContent>
           </Select>
           <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
-            <SelectTrigger className="w-32 bg-black/50 border-white/20">
+            <SelectTrigger className="w-28 sm:w-32 bg-black/50 border-white/20 text-xs sm:text-sm">
               <SelectValue placeholder="Risk" />
             </SelectTrigger>
             <SelectContent className="bg-slate-900 border-white/20 text-white">
@@ -294,42 +494,53 @@ export default function WarRoomDashboard() {
           <Button 
             onClick={runAnalysis} 
             disabled={isRunning}
-            className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold"
+            className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs sm:text-sm"
           >
             {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
           </Button>
-          <Button 
-            onClick={scanWatchlist} 
-            disabled={isScanning}
-            variant="outline"
-            className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10 font-bold text-xs"
-          >
-            {isScanning ? "SCANNING..." : "📡 SCAN"}
-          </Button>
-          <Button 
-            onClick={runConsensus} 
-            disabled={isConsensusRunning}
-            variant="outline"
-            className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 font-bold text-xs"
-          >
-            {isConsensusRunning ? "VOTING..." : "🗳️ CONSENSUS"}
-          </Button>
-          <Button 
-            onClick={runICT} 
-            disabled={isIctRunning}
-            variant="outline"
-            className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs"
-          >
-            {isIctRunning ? "READING..." : "🏦 ICT"}
-          </Button>
-          <Button 
-            onClick={runBacktest} 
-            disabled={isBacktesting}
-            variant="outline"
-            className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 font-bold text-xs"
-          >
-            {isBacktesting ? "TESTING..." : "📈 BACKTEST"}
-          </Button>
+          {isRunning && (
+            <Button 
+              onClick={cancelAnalysis}
+              variant="outline"
+              className="border-red-500/50 text-red-400 hover:bg-red-500/10 font-bold text-xs"
+            >
+              âœ• CANCEL
+            </Button>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button 
+              onClick={scanWatchlist} 
+              disabled={isScanning}
+              variant="outline"
+              className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10 font-bold text-xs"
+            >
+              {isScanning ? "SCANNING..." : "ðŸ“¡ SCAN"}
+            </Button>
+            <Button 
+              onClick={runConsensus} 
+              disabled={isConsensusRunning}
+              variant="outline"
+              className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 font-bold text-xs"
+            >
+              {isConsensusRunning ? "VOTING..." : "ðŸ—³ï¸ CONSENSUS"}
+            </Button>
+            <Button 
+              onClick={runICT} 
+              disabled={isIctRunning}
+              variant="outline"
+              className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs"
+            >
+              {isIctRunning ? "READING..." : "ðŸ¦ ICT"}
+            </Button>
+            <Button 
+              onClick={runBacktest} 
+              disabled={isBacktesting}
+              variant="outline"
+              className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 font-bold text-xs"
+            >
+              {isBacktesting ? "TESTING..." : "ðŸ“ˆ BACKTEST"}
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -349,10 +560,10 @@ export default function WarRoomDashboard() {
         </div>
       )}
 
-      <main className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* ═══ CHART + SIGNAL HISTORY TABS ═══ */}
+      <main className="p-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
+        {/* â•â•â• CHART + SIGNAL HISTORY TABS â•â•â• */}
         <div className="border border-white/10 rounded-lg bg-black/30 backdrop-blur-sm overflow-hidden">
-          <div className="flex border-b border-white/10">
+          <div className="flex overflow-x-auto scrollbar-hide border-b border-white/10">
             <button
               onClick={() => setActiveTab("chart")}
               className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
@@ -361,7 +572,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              📊 LIVE CHART
+              ðŸ“Š LIVE CHART
             </button>
             <button
               onClick={() => setActiveTab("history")}
@@ -371,7 +582,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              📜 HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
+              ðŸ“œ HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
             </button>
             <button
               onClick={() => { setActiveTab("watchlist"); if (!watchlistData) scanWatchlist(); }}
@@ -381,7 +592,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              📡 WATCHLIST
+              ðŸ“¡ WATCHLIST
             </button>
             <button
               onClick={() => setActiveTab("consensus")}
@@ -391,7 +602,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              🗳️ CONSENSUS
+              ðŸ—³ï¸ CONSENSUS
             </button>
             <button
               onClick={() => { setActiveTab("ict"); if (!ictData) runICT(); }}
@@ -401,7 +612,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              🏦 ICT
+              ðŸ¦ ICT
             </button>
             <button
               onClick={() => { setActiveTab("backtest"); if (!backtestData) runBacktest(); }}
@@ -411,7 +622,17 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              📈 BACKTEST
+              ðŸ“ˆ BACKTEST
+            </button>
+            <button
+              onClick={() => { setActiveTab("outcomes"); if (!outcomesData) loadOutcomes(); }}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all whitespace-nowrap ${
+                activeTab === "outcomes"
+                  ? "text-pink-400 border-b-2 border-pink-500 bg-pink-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              ðŸŽ¯ PERFORMANCE
             </button>
           </div>
 
@@ -423,6 +644,46 @@ export default function WarRoomDashboard() {
 
           {activeTab === "watchlist" && (
             <div className="p-4">
+              <div className="mb-3 flex flex-wrap gap-2 items-center">
+                <div className="flex gap-1 items-center">
+                  <Input
+                    value={newWatchlistTicker}
+                    onChange={e => setNewWatchlistTicker(e.target.value.toUpperCase())}
+                    placeholder="Add ticker..."
+                    className="w-28 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold text-xs h-8"
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && newWatchlistTicker && !watchlistTickers.includes(newWatchlistTicker)) {
+                        setWatchlistTickers(prev => [...prev, newWatchlistTicker]);
+                        setNewWatchlistTicker("");
+                        addToast(`Added ${newWatchlistTicker} to watchlist`, "success");
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs h-8 px-2"
+                    onClick={() => {
+                      if (newWatchlistTicker && !watchlistTickers.includes(newWatchlistTicker)) {
+                        setWatchlistTickers(prev => [...prev, newWatchlistTicker]);
+                        setNewWatchlistTicker("");
+                        addToast(`Added ${newWatchlistTicker} to watchlist`, "success");
+                      }
+                    }}
+                  >+</Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {watchlistTickers.map(t => (
+                    <Badge key={t} variant="outline" className="text-purple-400 border-purple-500/30 bg-purple-500/5 text-[10px] cursor-pointer hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-400 transition-colors"
+                      onClick={() => {
+                        setWatchlistTickers(prev => prev.filter(x => x !== t));
+                        addToast(`Removed ${t} from watchlist`, "info");
+                      }}
+                    >
+                      {t} Ã—
+                    </Badge>
+                  ))}
+                </div>
+              </div>
               <WatchlistPanel data={watchlistData} isScanning={isScanning} onSelect={(t: string) => { setTicker(t); setActiveTab("chart"); loadChartData(t, timeframe); }} />
             </div>
           )}
@@ -442,6 +703,86 @@ export default function WarRoomDashboard() {
           {activeTab === "backtest" && (
             <div className="p-4">
               <BacktestPanel data={backtestData} isRunning={isBacktesting} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "outcomes" && (
+            <div className="p-4">
+              {!outcomesData ? (
+                <div className="text-center text-slate-600 py-8">Loading performance data...</div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Stats Row */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded bg-black/40 border border-pink-500/20 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold">TOTAL TRACKED</div>
+                      <div className="text-2xl font-black text-white">{outcomesData.total || 0}</div>
+                    </div>
+                    <div className="p-3 rounded bg-black/40 border border-green-500/20 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold">WINS</div>
+                      <div className="text-2xl font-black text-green-400">{outcomesData.wins || 0}</div>
+                    </div>
+                    <div className="p-3 rounded bg-black/40 border border-red-500/20 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold">LOSSES</div>
+                      <div className="text-2xl font-black text-red-400">{outcomesData.losses || 0}</div>
+                    </div>
+                    <div className="p-3 rounded bg-black/40 border border-cyan-500/20 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold">WIN RATE</div>
+                      <div className={`text-2xl font-black ${(outcomesData.win_rate || 0) >= 50 ? "text-green-400" : "text-red-400"}`}>
+                        {outcomesData.win_rate || 0}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Learning Context */}
+                  {outcomesData.learning_context && (
+                    <div className="p-3 rounded bg-pink-500/5 border border-pink-500/20">
+                      <div className="text-[10px] text-pink-400 font-bold mb-1">ðŸ§  AI SELF-LEARNING CONTEXT</div>
+                      <pre className="text-[11px] text-slate-400 whitespace-pre-wrap font-mono">{outcomesData.learning_context}</pre>
+                    </div>
+                  )}
+
+                  {/* Report Outcome for current signal */}
+                  {signal && (
+                    <div className="p-3 rounded bg-black/40 border border-white/10">
+                      <div className="text-[10px] text-slate-400 font-bold mb-2">REPORT OUTCOME FOR: {signal.ticker} {signal.signal}</div>
+                      <div className="flex gap-2">
+                        <Button size="sm" className="bg-green-600 hover:bg-green-500 text-white font-bold text-xs" onClick={() => reportOutcome(signal, "WIN", 2.0)}>
+                          âœ… WIN (+2%)
+                        </Button>
+                        <Button size="sm" className="bg-green-700 hover:bg-green-600 text-white font-bold text-xs" onClick={() => reportOutcome(signal, "WIN", 5.0)}>
+                          âœ… WIN (+5%)
+                        </Button>
+                        <Button size="sm" className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs" onClick={() => reportOutcome(signal, "LOSS", -1.0)}>
+                          âŒ LOSS (-1%)
+                        </Button>
+                        <Button size="sm" className="bg-red-700 hover:bg-red-600 text-white font-bold text-xs" onClick={() => reportOutcome(signal, "LOSS", -2.0)}>
+                          âŒ LOSS (-2%)
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent Outcomes */}
+                  {outcomesData.outcomes?.length > 0 && (
+                    <div>
+                      <div className="text-[10px] text-slate-500 font-bold mb-2">RECENT OUTCOMES</div>
+                      <div className="space-y-1 max-h-[250px] overflow-y-auto">
+                        {outcomesData.outcomes.map((o: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3 p-2 bg-black/30 rounded text-xs">
+                            <span className={`font-bold min-w-[50px] ${o.result === "WIN" ? "text-green-400" : "text-red-400"}`}>{o.result}</span>
+                            <span className="text-white font-bold">{o.ticker}</span>
+                            <span className="text-slate-500">{o.signal}</span>
+                            <span className={`ml-auto font-black ${o.pnl_pct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {o.pnl_pct > 0 ? "+" : ""}{o.pnl_pct}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -626,592 +967,23 @@ export default function WarRoomDashboard() {
           </div>
         )}
       </main>
-    </div>
-  );
-}
 
-// ═══ MINI CHART COMPONENT (TradingView Lightweight Charts) ═══
-function MiniChart({ chartData, signal, ticker }: { chartData: any, signal: SignalPayload | null, ticker: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<any>(null);
-  const [lwcLoaded, setLwcLoaded] = useState(false);
-  const [lwcModule, setLwcModule] = useState<any>(null);
-
-  // Load LWC library dynamically
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
-    script.async = true;
-    script.onload = () => {
-      setLwcLoaded(true);
-      setLwcModule((window as any).LightweightCharts);
-    };
-    document.head.appendChild(script);
-    return () => { document.head.removeChild(script); };
-  }, []);
-
-  // Render chart when data arrives
-  useEffect(() => {
-    if (!lwcLoaded || !lwcModule || !containerRef.current || !chartData?.candles?.length) return;
-
-    // Clear previous chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
-    }
-
-    const chart = lwcModule.createChart(containerRef.current, {
-      layout: {
-        background: { type: "solid", color: "#0a0a0b" },
-        textColor: "#64748b",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: "rgba(255,255,255,0.03)" },
-        horzLines: { color: "rgba(255,255,255,0.03)" },
-      },
-      crosshair: {
-        mode: 0,
-        vertLine: { color: "rgba(103,232,249,0.3)", width: 1, style: 2 },
-        horzLine: { color: "rgba(103,232,249,0.3)", width: 1, style: 2 },
-      },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
-      timeScale: {
-        borderColor: "rgba(255,255,255,0.1)",
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      width: containerRef.current.clientWidth,
-      height: 350,
-    });
-
-    // Candlestick series
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-    candleSeries.setData(chartData.candles);
-
-    // Volume
-    const volumeSeries = chart.addHistogramSeries({
-      color: "rgba(103,232,249,0.15)",
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },
-    });
-    const volData = chartData.candles.map((c: any) => ({
-      time: c.time,
-      value: c.volume,
-      color: c.close >= c.open ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)",
-    }));
-    volumeSeries.setData(volData);
-
-    // EMA 9 overlay
-    if (chartData.indicators?.ema9?.length) {
-      const ema9Series = chart.addLineSeries({ color: "#67e8f9", lineWidth: 1, priceLineVisible: false });
-      ema9Series.setData(chartData.indicators.ema9);
-    }
-
-    // EMA 21 overlay
-    if (chartData.indicators?.ema21?.length) {
-      const ema21Series = chart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false });
-      ema21Series.setData(chartData.indicators.ema21);
-    }
-
-    // VWAP overlay
-    if (chartData.indicators?.vwap?.length) {
-      const vwapSeries = chart.addLineSeries({ color: "#a78bfa", lineWidth: 1, lineStyle: 2, priceLineVisible: false });
-      vwapSeries.setData(chartData.indicators.vwap);
-    }
-
-    // Signal levels (entry zone, SL, TP)
-    if (signal && signal.signal !== "NO_TRADE") {
-      const entryColor = signal.signal === "LONG" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
-      
-      candleSeries.createPriceLine({
-        price: signal.entry_zone.min,
-        color: entryColor,
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "Entry Min",
-      });
-      candleSeries.createPriceLine({
-        price: signal.entry_zone.max,
-        color: entryColor,
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "Entry Max",
-      });
-      candleSeries.createPriceLine({
-        price: signal.stop_loss,
-        color: "#ef4444",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "SL",
-      });
-      signal.take_profit.forEach((tp) => {
-        candleSeries.createPriceLine({
-          price: tp.price,
-          color: "#22c55e",
-          lineWidth: 1,
-          lineStyle: 0,
-          axisLabelVisible: true,
-          title: `TP${tp.level}`,
-        });
-      });
-    }
-
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
-
-    // Responsive
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [lwcLoaded, lwcModule, chartData, signal]);
-
-  if (!chartData?.candles?.length) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
-        <div className="text-center">
-          <div className="text-3xl mb-2">📊</div>
-          <div className="text-sm">Run an analysis to load chart data</div>
-          <div className="text-[10px] mt-1 text-slate-700">{ticker} • With EMA 9/21, VWAP overlays & signal levels</div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-3 mb-3">
-        <span className="text-xs text-white font-bold">{chartData.ticker || ticker}</span>
-        <span className="text-[10px] text-slate-600">{chartData.symbol}</span>
-        <div className="flex gap-3 ml-auto text-[10px]">
-          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 inline-block"></span> EMA 9</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-400 inline-block"></span> EMA 21</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-400 inline-block" style={{borderTop: "1px dashed"}}></span> VWAP</span>
-        </div>
-      </div>
-      <div ref={containerRef} className="w-full rounded overflow-hidden" />
-    </div>
-  );
-}
-
-// ═══ AGENT CARD COMPONENT ═══
-function AgentCard({ title, data, accent = "white" }: { title: string, data?: string, accent?: string }) {
-  const isComplete = !!data;
-  
-  return (
-    <Card className="bg-black/30 border-white/10 backdrop-blur-md transition-all duration-500 overflow-hidden h-full flex flex-col">
-      <CardHeader className="border-b border-white/5 pb-2 bg-gradient-to-b from-white/[0.02] to-transparent">
-        <CardTitle className={`text-sm tracking-wider flex justify-between items-center ${accent === "cyan" ? "text-cyan-400" : "text-slate-300"}`}>
-          <span>[{title}]</span>
-          {isComplete && <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/20 px-1 py-0 text-[10px] animate-in fade-in">DONE</Badge>}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-4 text-xs leading-relaxed text-slate-400 flex-grow">
-        {data ? (
-          <div className="animate-in fade-in slide-in-from-top-2">{data}</div>
-        ) : (
-          <div className="flex space-x-1 items-center opacity-50">
-            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce"></div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ═══ WATCHLIST PANEL ═══
-function WatchlistPanel({ data, isScanning, onSelect }: { data: any, isScanning: boolean, onSelect: (t: string) => void }) {
-  if (isScanning) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-purple-400">
-        <div className="text-center">
-          <div className="text-3xl mb-2 animate-spin">📡</div>
-          <div className="text-sm">Scanning 8 tickers across all indicators...</div>
-          <div className="text-[10px] mt-2 text-slate-600">RSI • MACD • EMA Cross • ADX • Volume</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data?.tickers?.length) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
-        <div className="text-center">
-          <div className="text-3xl mb-2">📡</div>
-          <div className="text-sm">Click SCAN to scan your watchlist</div>
-          <div className="text-[10px] mt-1 text-slate-700">NQ1 • ES1 • AAPL • NVDA • TSLA • BTC • GOLD • AMZN</div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-slate-500">
-          Scanned: {new Date(data.scanned_at).toLocaleTimeString()} • {data.timeframe}
-        </span>
-        {data.best_opportunity && (
-          <span className="text-xs text-purple-400">
-            🏆 Best: <strong>{data.best_opportunity.ticker}</strong> (score: {data.best_opportunity.score})
-          </span>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        {data.tickers.map((t: any, i: number) => (
-          <div
-            key={i}
-            onClick={() => !t.error && onSelect(t.ticker)}
-            className="flex items-center gap-3 p-2.5 bg-black/40 rounded border border-white/5 hover:border-white/20 transition-all cursor-pointer group"
-          >
-            {/* Rank */}
-            <span className="text-[10px] text-slate-600 w-5">#{i + 1}</span>
-
-            {/* Direction badge */}
-            <div className={`px-2 py-0.5 rounded text-[10px] font-black min-w-[60px] text-center ${
-              t.direction === "LONG" ? "bg-green-500/20 text-green-400" :
-              t.direction === "SHORT" ? "bg-red-500/20 text-red-400" :
-              "bg-slate-500/20 text-slate-400"
-            }`}>
-              {t.direction || "ERR"}
+      {/* Toast Notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[100] space-y-2 max-w-sm">
+          {toasts.map(toast => (
+            <div
+              key={toast.id}
+              className={`px-4 py-3 rounded-lg border backdrop-blur-md shadow-2xl text-xs font-bold animate-in slide-in-from-right duration-300 ${
+                toast.type === "success" ? "bg-green-500/20 border-green-500/40 text-green-400" :
+                toast.type === "error" ? "bg-red-500/20 border-red-500/40 text-red-400" :
+                "bg-cyan-500/20 border-cyan-500/40 text-cyan-400"
+              }`}
+            >
+              {toast.type === "success" ? "âœ… " : toast.type === "error" ? "âŒ " : "â„¹ï¸ "}
+              {toast.message}
             </div>
-
-            {/* Ticker + Price */}
-            <div className="w-16">
-              <div className="text-white font-bold text-xs group-hover:text-cyan-400 transition-colors">{t.ticker}</div>
-            </div>
-            <div className="text-slate-300 text-xs w-20">${t.price || "—"}</div>
-
-            {/* Score bar */}
-            <div className="flex-1 relative h-4 bg-black/40 rounded overflow-hidden">
-              <div
-                className={`absolute top-0 h-full rounded transition-all ${
-                  t.score > 0 ? "bg-green-500/40 left-1/2" : "bg-red-500/40 right-1/2"
-                }`}
-                style={{ width: `${Math.abs(t.score || 0) / 2}%` }}
-              />
-              <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${
-                t.score > 15 ? "text-green-400" : t.score < -15 ? "text-red-400" : "text-slate-500"
-              }`}>
-                {t.score || 0}
-              </span>
-            </div>
-
-            {/* Quick indicators */}
-            <div className="flex gap-2 text-[10px] text-slate-500 w-48 justify-end">
-              {t.rsi && <span>RSI:{t.rsi}</span>}
-              {t.adx && <span>ADX:{t.adx}</span>}
-              {t.vol_ratio && <span>Vol:{t.vol_ratio}x</span>}
-            </div>
-
-            <span className="text-slate-700 text-xs group-hover:text-cyan-500 transition-colors">→</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ═══ CONSENSUS PANEL ═══
-function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
-  if (isRunning) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-amber-400">
-        <div className="text-center">
-          <div className="text-3xl mb-2 animate-pulse">🗳️</div>
-          <div className="text-sm">Querying 3 AI models on <span className="text-white font-bold">{ticker}</span>...</div>
-          <div className="text-[10px] mt-2 text-slate-600">GPT-4o-mini • Claude 3.5 Haiku • Gemini 2.0 Flash</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data?.verdicts?.length) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
-        <div className="text-center">
-          <div className="text-3xl mb-2">🗳️</div>
-          <div className="text-sm">Click CONSENSUS to run multi-model voting</div>
-          <div className="text-[10px] mt-1 text-slate-700">3 AI models vote independently on the same signal</div>
-        </div>
-      </div>
-    );
-  }
-
-  const consensusColor = data.consensus === "LONG" ? "text-green-400" : data.consensus === "SHORT" ? "text-red-400" : "text-yellow-400";
-  const consensusBg = data.consensus === "LONG" ? "bg-green-500/20" : data.consensus === "SHORT" ? "bg-red-500/20" : "bg-yellow-500/20";
-
-  return (
-    <div>
-      {/* Consensus Header */}
-      <div className="flex items-center justify-between mb-4 p-3 rounded bg-black/40 border border-white/10">
-        <div>
-          <div className="text-xs text-slate-500">MULTI-MODEL CONSENSUS</div>
-          <div className={`text-2xl font-black tracking-widest ${consensusColor}`}>{data.consensus}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-slate-500">Agreement</div>
-          <div className="text-xl font-bold text-white">{data.agreement} <span className="text-sm text-slate-500">({data.agreement_pct}%)</span></div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-slate-500">Avg. Confidence</div>
-          <div className="text-xl font-bold text-white">{data.avg_confidence}%</div>
-        </div>
-      </div>
-
-      {/* Individual Model Verdicts */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {data.verdicts.map((v: any, i: number) => {
-          const sigColor = v.signal === "LONG" ? "border-green-500/30 bg-green-500/5" : v.signal === "SHORT" ? "border-red-500/30 bg-red-500/5" : "border-slate-500/30 bg-slate-500/5";
-          const sigText = v.signal === "LONG" ? "text-green-400" : v.signal === "SHORT" ? "text-red-400" : "text-yellow-400";
-
-          return (
-            <div key={i} className={`p-3 rounded border ${sigColor}`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-slate-500 font-bold">
-                  {v.model === "gpt-4o-mini" ? "🤖 GPT-4o" :
-                   v.model?.includes("claude") ? "🟣 Claude" :
-                   v.model?.includes("gemini") ? "💎 Gemini" : v.model}
-                </span>
-                <span className={`text-xs font-black ${sigText}`}>{v.signal || "?"}</span>
-              </div>
-              <div className="text-xs text-slate-400 space-y-1">
-                {v.confidence !== undefined && <div>Confidence: <span className="text-white">{v.confidence}%</span></div>}
-                {v.entry && <div>Entry: <span className="text-white">{v.entry}</span></div>}
-                {v.stop_loss && <div>SL: <span className="text-red-400">{v.stop_loss}</span></div>}
-                {v.take_profit && <div>TP: <span className="text-green-400">{v.take_profit}</span></div>}
-                {v.reason && <div className="mt-2 text-[10px] text-slate-500 italic">{v.reason}</div>}
-                {v.error && <div className="mt-2 text-[10px] text-red-400">{v.error}</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-3 text-[10px] text-slate-600 text-center">
-        Scanned: {data.scanned_at ? new Date(data.scanned_at).toLocaleTimeString() : "—"} • {data.ticker} on {data.timeframe}
-      </div>
-    </div>
-  );
-}
-
-// ═══ ICT PANEL ═══
-function ICTPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
-  if (isRunning) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-emerald-400">
-        <div className="text-center">
-          <div className="text-3xl mb-2 animate-pulse">🏦</div>
-          <div className="text-sm">Detecting Smart Money on <span className="text-white font-bold">{ticker}</span>...</div>
-          <div className="text-[10px] mt-2 text-slate-600">CHoCH • BOS • Order Blocks • Fair Value Gaps</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data?.ict || data.error) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
-        <div className="text-center">
-          <div className="text-3xl mb-2">🏦</div>
-          <div className="text-sm">Click ICT to run Smart Money analysis</div>
-          <div className="text-[10px] mt-1 text-slate-700">Market Structure • Order Blocks • FVG Detection</div>
-        </div>
-      </div>
-    );
-  }
-
-  const ict = data.ict;
-  const structColor = ict.market_structure?.includes("BULLISH") ? "text-green-400" : ict.market_structure?.includes("BEARISH") ? "text-red-400" : "text-yellow-400";
-
-  return (
-    <div>
-      {/* Structure Header */}
-      <div className="flex items-center justify-between mb-4 p-3 rounded bg-black/40 border border-white/10">
-        <div>
-          <div className="text-xs text-slate-500">MARKET STRUCTURE</div>
-          <div className={`text-xl font-black tracking-widest ${structColor}`}>{ict.market_structure || "UNKNOWN"}</div>
-        </div>
-        <div className="text-right text-xs text-slate-500">
-          {data.ticker} • {data.timeframe}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Structure Events */}
-        <div className="p-3 rounded border border-emerald-500/20 bg-emerald-500/5">
-          <div className="text-[10px] text-emerald-400 font-bold mb-2">📐 STRUCTURE (BOS/CHoCH)</div>
-          {ict.structure_events?.length ? ict.structure_events.map((e: any, i: number) => (
-            <div key={i} className="mb-1.5">
-              <span className={`text-xs font-bold ${e.direction === "BULLISH" ? "text-green-400" : "text-red-400"}`}>
-                {e.type}: {e.direction}
-              </span>
-              <div className="text-[10px] text-slate-500">{e.detail}</div>
-            </div>
-          )) : <div className="text-[10px] text-slate-600">No structure breaks detected</div>}
-        </div>
-
-        {/* Order Blocks */}
-        <div className="p-3 rounded border border-blue-500/20 bg-blue-500/5">
-          <div className="text-[10px] text-blue-400 font-bold mb-2">🧱 ORDER BLOCKS</div>
-          {ict.order_blocks?.length ? ict.order_blocks.map((ob: any, i: number) => (
-            <div key={i} className="mb-1.5">
-              <span className={`text-xs font-bold ${ob.type.includes("BULLISH") ? "text-green-400" : "text-red-400"}`}>
-                {ob.type}
-              </span>
-              <div className="text-[10px] text-slate-400">Zone: {ob.bottom} — {ob.top}</div>
-            </div>
-          )) : <div className="text-[10px] text-slate-600">No order blocks detected</div>}
-        </div>
-
-        {/* Fair Value Gaps */}
-        <div className="p-3 rounded border border-violet-500/20 bg-violet-500/5">
-          <div className="text-[10px] text-violet-400 font-bold mb-2">📏 FAIR VALUE GAPS</div>
-          {ict.fair_value_gaps?.length ? ict.fair_value_gaps.map((fvg: any, i: number) => (
-            <div key={i} className="mb-1.5">
-              <span className={`text-xs font-bold ${fvg.type.includes("BULLISH") ? "text-green-400" : "text-red-400"}`}>
-                {fvg.type}
-              </span>
-              <div className="text-[10px] text-slate-400">Gap: {fvg.bottom} — {fvg.top} (size: {fvg.size})</div>
-            </div>
-          )) : <div className="text-[10px] text-slate-600">No FVGs detected</div>}
-        </div>
-      </div>
-
-      {/* Key Levels */}
-      <div className="mt-3 flex gap-4">
-        {ict.recent_swing_highs?.length > 0 && (
-          <div className="text-[10px] text-slate-500">
-            🔺 Resistance: <span className="text-red-400 font-bold">{ict.recent_swing_highs.map((s: any) => s.price).join(", ")}</span>
-          </div>
-        )}
-        {ict.recent_swing_lows?.length > 0 && (
-          <div className="text-[10px] text-slate-500">
-            🔻 Support: <span className="text-green-400 font-bold">{ict.recent_swing_lows.map((s: any) => s.price).join(", ")}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ═══ BACKTEST PANEL ═══
-function BacktestPanel({ data, isRunning, ticker }: { data: any, isRunning: boolean, ticker: string }) {
-  if (isRunning) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-orange-400">
-        <div className="text-center">
-          <div className="text-3xl mb-2 animate-spin">📈</div>
-          <div className="text-sm">Backtesting <span className="text-white font-bold">{ticker}</span>...</div>
-          <div className="text-[10px] mt-2 text-slate-600">Replaying signals against historical data</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data || data.error) {
-    return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
-        <div className="text-center">
-          <div className="text-3xl mb-2">📈</div>
-          <div className="text-sm">{data?.error || "Click BACKTEST to replay signals"}</div>
-          <div className="text-[10px] mt-1 text-slate-700">Win rate • Sharpe • Max DD • Kelly sizing</div>
-        </div>
-      </div>
-    );
-  }
-
-  const wrColor = data.win_rate >= 60 ? "text-green-400" : data.win_rate >= 45 ? "text-yellow-400" : "text-red-400";
-  const eqColor = data.equity_change_pct >= 0 ? "text-green-400" : "text-red-400";
-  const kelly = data.kelly_optimal_pct || {};
-
-  return (
-    <div>
-      {/* Stats Header */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
-          <div className="text-[10px] text-slate-500">WIN RATE</div>
-          <div className={`text-xl font-black ${wrColor}`}>{data.win_rate}%</div>
-          <div className="text-[10px] text-slate-600">{data.wins}W / {data.losses}L</div>
-        </div>
-        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
-          <div className="text-[10px] text-slate-500">PROFIT FACTOR</div>
-          <div className="text-xl font-black text-white">{data.profit_factor}</div>
-        </div>
-        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
-          <div className="text-[10px] text-slate-500">SHARPE</div>
-          <div className={`text-xl font-black ${data.sharpe_ratio > 1 ? "text-green-400" : "text-yellow-400"}`}>{data.sharpe_ratio}</div>
-        </div>
-        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
-          <div className="text-[10px] text-slate-500">MAX DRAWDOWN</div>
-          <div className="text-xl font-black text-red-400">{data.max_drawdown_pct}%</div>
-        </div>
-        <div className="p-3 rounded bg-black/40 border border-white/10 text-center">
-          <div className="text-[10px] text-slate-500">EQUITY</div>
-          <div className={`text-xl font-black ${eqColor}`}>${data.final_equity?.toLocaleString()}</div>
-          <div className={`text-[10px] ${eqColor}`}>{data.equity_change_pct > 0 ? "+" : ""}{data.equity_change_pct}%</div>
-        </div>
-      </div>
-
-      {/* Kelly Criterion */}
-      {kelly.recommended !== undefined && (
-        <div className="mb-4 p-3 rounded bg-black/40 border border-orange-500/20">
-          <div className="text-[10px] text-orange-400 font-bold mb-2">🎯 KELLY CRITERION OPTIMAL SIZING</div>
-          <div className="grid grid-cols-4 gap-3 text-center">
-            <div>
-              <div className="text-[10px] text-slate-500">Full Kelly</div>
-              <div className="text-sm font-bold text-white">{kelly.full_kelly}%</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-slate-500">Half Kelly</div>
-              <div className="text-sm font-bold text-white">{kelly.half_kelly}%</div>
-            </div>
-            <div className="bg-orange-500/10 rounded p-1">
-              <div className="text-[10px] text-orange-400">★ Recommended</div>
-              <div className="text-sm font-black text-orange-400">{kelly.quarter_kelly}%</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-slate-500">Edge</div>
-              <div className={`text-sm font-bold ${kelly.edge > 0 ? "text-green-400" : "text-red-400"}`}>{kelly.edge}%</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recent Trades */}
-      {data.trades?.length > 0 && (
-        <div>
-          <div className="text-[10px] text-slate-500 font-bold mb-2">RECENT TRADES ({data.total_trades} total)</div>
-          <div className="space-y-1 max-h-[200px] overflow-y-auto">
-            {data.trades.map((t: any, i: number) => (
-              <div key={i} className="flex items-center gap-3 p-2 bg-black/30 rounded text-xs">
-                <span className={`font-bold min-w-[50px] ${t.direction === "LONG" ? "text-green-400" : "text-red-400"}`}>{t.direction}</span>
-                <span className="text-slate-400">Entry: ${t.entry}</span>
-                <span className="text-slate-400">→ ${t.exit}</span>
-                <span className={`font-black ${t.result === "WIN" ? "text-green-400" : "text-red-400"}`}>{t.result}</span>
-                <span className={`text-[10px] ${t.pnl_pct >= 0 ? "text-green-500" : "text-red-500"}`}>{t.pnl_pct > 0 ? "+" : ""}{t.pnl_pct}%</span>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       )}
     </div>

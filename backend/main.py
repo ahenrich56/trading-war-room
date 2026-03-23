@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
@@ -602,17 +603,20 @@ def get_economic_calendar() -> str:
 #  AI WRAPPER
 # ═══════════════════════════════════════════════════════════
 
-async def ask_ai(role: str, prompt: str, max_tokens: int = 300) -> str:
+async def ask_ai(role: str, prompt: str, max_tokens: int = 300, learning_context: str = "") -> str:
     if not client:
         await asyncio.sleep(1)
         return f"[{role}] Mock response - missing API key."
     try:
+        system_msg = f"You are a hedge fund {role}. Provide decisive, data-driven analysis. Reference exact indicator values provided. Be specific about price levels."
+        if learning_context:
+            system_msg += f"\n\n{learning_context}"
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=max_tokens,
             temperature=0.3,
             messages=[
-                {"role": "system", "content": f"You are a hedge fund {role}. Provide decisive, data-driven analysis. Reference exact indicator values provided. Be specific about price levels."},
+                {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -656,6 +660,26 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         full_data = f"{mtf_summary}\n\n{ict_text}\n\n{market_context}\n\n{econ_calendar}"
 
+        # ── 0b. Fetch self-learning context from outcomes DB ──
+        learning_ctx = ""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            rows = conn.execute("SELECT data FROM outcomes ORDER BY id DESC LIMIT 100").fetchall()
+            conn.close()
+            outcome_list = [json.loads(row[0]) for row in rows]
+            total = len(outcome_list)
+            if total >= 5:
+                wins = sum(1 for o in outcome_list if o["result"] == "WIN")
+                losses = total - wins
+                win_rate = round(wins / total * 100, 1)
+                recent = outcome_list[:10]
+                learning_ctx = f"SELF-LEARNING DATA ({wins}W/{losses}L, {win_rate}% win rate from {total} tracked signals):\n"
+                for o in recent:
+                    learning_ctx += f"  {o['ticker']} {o['signal']} -> {o['result']} ({o['pnl_pct']}%)\n"
+                learning_ctx += "Use this data to calibrate your confidence levels and avoid repeating losing patterns."
+        except Exception:
+            pass  # Self-learning is optional, don't break analysis
+
         price_anchor = (
             f"\nCRITICAL: CURRENT LIVE PRICE of {ticker} is {current_price}. "
             f"ALL prices MUST be within realistic range of {current_price}. DO NOT hallucinate."
@@ -671,7 +695,7 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         analyst_outputs = {}
         for role, prompt in analysts.items():
-            text = await ask_ai(role, prompt)
+            text = await ask_ai(role, prompt, learning_context=learning_ctx)
             analyst_outputs[role] = text
             yield emit(role, {"text": text})
 
@@ -680,12 +704,12 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         bear_text = await ask_ai("BEAR_RESEARCHER",
             f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
-            f"Argue BEARISH case against {ticker} at {current_price}. Use specific indicator values.", 300)
+            f"Argue BEARISH case against {ticker} at {current_price}. Use specific indicator values.", 300, learning_context=learning_ctx)
         yield emit("BEAR_RESEARCHER", {"text": bear_text})
 
         bull_text = await ask_ai("BULL_RESEARCHER",
             f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
-            f"Argue BULLISH case for {ticker} at {current_price}. Use specific indicator values.", 300)
+            f"Argue BULLISH case for {ticker} at {current_price}. Use specific indicator values.", 300, learning_context=learning_ctx)
         yield emit("BULL_RESEARCHER", {"text": bull_text})
 
         # ── 3. TRADER & RISK ──
@@ -693,13 +717,13 @@ async def generate_analysis_stream(req: AnalysisRequest):
             f"Review bull/bear for {ticker}. Price: {current_price}. "
             f"ATR={primary.get('ATR_14', 'N/A')}, BB upper={primary.get('BB_upper', 'N/A')}, "
             f"BB lower={primary.get('BB_lower', 'N/A')}, VWAP={primary.get('VWAP', 'N/A')}. "
-            f"Timeframe: {tf}. Be decisive.", 250)
+            f"Timeframe: {tf}. Be decisive.", 250, learning_context=learning_ctx)
         yield emit("TRADER_DECISION", {"text": trader_text})
 
         atr_val = primary.get("ATR_14", 0)
         risk_text = await ask_ai("RISK_MANAGER",
             f"Review trader plan for {ticker} at {current_price}. ATR(14)={atr_val}. "
-            f"Risk profile: {risk}.\n{market_context}\nApprove? Size recommendation.", 250)
+            f"Risk profile: {risk}.\n{market_context}\nApprove? Size recommendation.", 250, learning_context=learning_ctx)
         yield emit("RISK_MANAGER", {"text": risk_text})
 
         # ── 4. SIGNAL ENGINE ──
@@ -749,7 +773,7 @@ Output ONLY valid JSON, no markdown:
     "indicators_used": {{"RSI_14": {primary.get('RSI_14', 'null')}, "MACD_histogram": {primary.get('MACD_histogram', 'null')}, "ATR_14": {primary.get('ATR_14', 'null')}, "ADX": {primary.get('ADX', 'null')}}}
 }}
 """
-        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 600)
+        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 600, learning_context=learning_ctx)
         clean_json = signal_text.replace("```json", "").replace("```", "").strip()
 
         try:
@@ -785,18 +809,41 @@ Output ONLY valid JSON, no markdown:
 
 
 # ═══════════════════════════════════════════════════════════
-#  SIGNAL HISTORY (In-memory, last 50 signals)
+#  PERSISTENT STORAGE (SQLite)
 # ═══════════════════════════════════════════════════════════
 
-signal_history: list[dict] = []
-MAX_HISTORY = 50
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "war_room.db")
+
+def _init_db():
+    """Initialize SQLite database with signals and outcomes tables."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS outcomes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+_init_db()
+
 
 async def store_signal(signal_data: dict):
-    """Store a signal in the history buffer."""
-    global signal_history
-    signal_history.insert(0, signal_data)
-    if len(signal_history) > MAX_HISTORY:
-        signal_history = signal_history[:MAX_HISTORY]
+    """Store a signal in the SQLite database."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT INTO signals (data) VALUES (?)", (json.dumps(signal_data),))
+    conn.commit()
+    conn.close()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -949,8 +996,15 @@ async def analyze_endpoint(request: AnalysisRequest):
 
 @app.get("/api/v1/signals")
 async def get_signal_history(limit: int = 20):
-    """Return recent signal history."""
-    return {"signals": signal_history[:limit], "total": len(signal_history)}
+    """Return recent signal history from SQLite."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute(
+        "SELECT data FROM signals ORDER BY id DESC LIMIT ?", (limit,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    signals = [json.loads(row[0]) for row in rows]
+    return {"signals": signals, "total": len(signals)}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1432,10 +1486,6 @@ async def backtest_endpoint(request: BacktestRequest):
 #  AI SELF-LEARNING LOOP
 # ═══════════════════════════════════════════════════════════
 
-# Outcome tracker — stores resolved signal outcomes
-outcome_history: list[dict] = []
-MAX_OUTCOMES = 100
-
 class OutcomeReport(BaseModel):
     ticker: str
     signal: str
@@ -1446,27 +1496,34 @@ class OutcomeReport(BaseModel):
 
 @app.post("/api/v1/outcomes/report")
 async def report_outcome(report: OutcomeReport):
-    """Report a signal outcome for the self-learning loop."""
+    """Report a signal outcome for the self-learning loop (SQLite)."""
     outcome = {
         **report.dict(),
         "reported_at": datetime.utcnow().isoformat() + "Z",
     }
-    outcome_history.insert(0, outcome)
-    if len(outcome_history) > MAX_OUTCOMES:
-        outcome_history[:] = outcome_history[:MAX_OUTCOMES]
-    return {"status": "recorded", "total_outcomes": len(outcome_history)}
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT INTO outcomes (data) VALUES (?)", (json.dumps(outcome),))
+    conn.commit()
+    total = conn.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+    conn.close()
+    return {"status": "recorded", "total_outcomes": total}
 
 @app.get("/api/v1/outcomes")
 async def get_outcomes():
-    """Get outcome history and performance stats for the self-learning prompt."""
-    total = len(outcome_history)
-    wins = sum(1 for o in outcome_history if o["result"] == "WIN")
-    losses = sum(1 for o in outcome_history if o["result"] == "LOSS")
+    """Get outcome history and performance stats for the self-learning prompt (SQLite)."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT data FROM outcomes ORDER BY id DESC LIMIT 100").fetchall()
+    conn.close()
+    outcome_list = [json.loads(row[0]) for row in rows]
+
+    total = len(outcome_list)
+    wins = sum(1 for o in outcome_list if o["result"] == "WIN")
+    losses = sum(1 for o in outcome_list if o["result"] == "LOSS")
     win_rate = round(wins / total * 100, 1) if total > 0 else 0
 
     # Build self-learning context string for AI
     if total >= 5:
-        recent = outcome_history[:10]
+        recent = outcome_list[:10]
         context = f"SELF-LEARNING: {wins}W/{losses}L ({win_rate}% win rate) from {total} signals.\n"
         for o in recent:
             context += f"  {o['ticker']} {o['signal']} → {o['result']} ({o['pnl_pct']}%)\n"
@@ -1478,7 +1535,7 @@ async def get_outcomes():
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
-        "outcomes": outcome_history[:20],
+        "outcomes": outcome_list[:20],
         "learning_context": context,
     }
 

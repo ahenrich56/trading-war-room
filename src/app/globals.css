@@ -127,3 +127,12 @@
     @apply font-sans;
   }
 }
+
+/* Scrollbar hide utility for mobile tab bars */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
