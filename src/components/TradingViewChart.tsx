@@ -10,19 +10,20 @@ interface TradingViewChartProps {
 function TradingViewChartInner({ ticker, timeframe }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Map common shorthand tickers to TradingView exchange-prefixed symbols
-  // Futures need the exchange prefix + continuous contract suffix for intraday data
+  // Map common shorthand tickers to TradingView symbols
+  // NOTE: CME futures feeds are restricted on the free embedded widget,
+  // so we use CFD/index equivalents that provide full intraday data
   const TV_SYMBOL_MAP: Record<string, string> = {
-    // ── Index Futures ──
-    "NQ": "CME_MINI:NQ1!", "NQ1": "CME_MINI:NQ1!", "NASDAQ": "CME_MINI:NQ1!", "MNQ": "CME_MINI:MNQ1!",
-    "ES": "CME_MINI:ES1!", "ES1": "CME_MINI:ES1!", "SPX": "CME_MINI:ES1!", "MES": "CME_MINI:MES1!",
-    "YM": "CBOT_MINI:YM1!", "YM1": "CBOT_MINI:YM1!", "DOW": "CBOT_MINI:YM1!", "MYM": "CBOT_MINI:MYM1!",
-    "RTY": "CME_MINI:RTY1!", "RTY1": "CME_MINI:RTY1!", "M2K": "CME_MINI:M2K1!",
+    // ── Index Futures → CFD/Index equivalents ──
+    "NQ": "PEPPERSTONE:NAS100", "NQ1": "PEPPERSTONE:NAS100", "NASDAQ": "PEPPERSTONE:NAS100", "MNQ": "PEPPERSTONE:NAS100",
+    "ES": "PEPPERSTONE:US500", "ES1": "PEPPERSTONE:US500", "SPX": "SP:SPX", "MES": "PEPPERSTONE:US500",
+    "YM": "PEPPERSTONE:US30", "YM1": "PEPPERSTONE:US30", "DOW": "PEPPERSTONE:US30", "MYM": "PEPPERSTONE:US30",
+    "RTY": "PEPPERSTONE:US2000", "RTY1": "PEPPERSTONE:US2000", "M2K": "PEPPERSTONE:US2000",
     // ── Commodities ──
-    "CL": "NYMEX:CL1!", "CL1": "NYMEX:CL1!", "OIL": "NYMEX:CL1!",
-    "GC": "COMEX:GC1!", "GC1": "COMEX:GC1!", "GOLD": "COMEX:GC1!", "XAUUSD": "OANDA:XAUUSD",
-    "SI": "COMEX:SI1!", "SI1": "COMEX:SI1!", "SILVER": "COMEX:SI1!",
-    "NG": "NYMEX:NG1!", "NG1": "NYMEX:NG1!",
+    "CL": "PEPPERSTONE:USOIL", "CL1": "PEPPERSTONE:USOIL", "OIL": "PEPPERSTONE:USOIL",
+    "GC": "PEPPERSTONE:XAUUSD", "GC1": "PEPPERSTONE:XAUUSD", "GOLD": "PEPPERSTONE:XAUUSD", "XAUUSD": "PEPPERSTONE:XAUUSD",
+    "SI": "PEPPERSTONE:XAGUSD", "SI1": "PEPPERSTONE:XAGUSD", "SILVER": "PEPPERSTONE:XAGUSD",
+    "NG": "PEPPERSTONE:NATGAS", "NG1": "PEPPERSTONE:NATGAS",
     // ── Bonds ──
     "ZB": "CBOT:ZB1!", "ZB1": "CBOT:ZB1!", "ZN": "CBOT:ZN1!", "ZN1": "CBOT:ZN1!",
     // ── Crypto ──
