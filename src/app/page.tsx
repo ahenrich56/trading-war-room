@@ -256,7 +256,7 @@ export default function WarRoomDashboard() {
     }
   }, [ticker, timeframe, addToast]);
 
-  // Multi-model consensus
+  // Multi-model consensus (runs independently due to multiple LLM latencies)
   const runConsensus = useCallback(async () => {
     setIsConsensusRunning(true);
     setActiveTab("consensus");
@@ -273,46 +273,6 @@ export default function WarRoomDashboard() {
       addToast("Consensus analysis failed", "error");
     } finally {
       setIsConsensusRunning(false);
-    }
-  }, [ticker, timeframe, addToast]);
-
-  // ICT Smart Money analysis
-  const runICT = useCallback(async () => {
-    setIsIctRunning(true);
-    setActiveTab("ict");
-    try {
-      const res = await fetch("/api/ict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, timeframe }),
-      });
-      const data = await res.json();
-      setIctData(data);
-      addToast("ICT analysis complete", "success");
-    } catch (e) {
-      addToast("ICT analysis failed", "error");
-    } finally {
-      setIsIctRunning(false);
-    }
-  }, [ticker, timeframe, addToast]);
-
-  // Backtesting
-  const runBacktest = useCallback(async () => {
-    setIsBacktesting(true);
-    setActiveTab("backtest");
-    try {
-      const res = await fetch("/api/backtest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, timeframe, lookback_days: 5 }),
-      });
-      const data = await res.json();
-      setBacktestData(data);
-      addToast("Backtest complete", "success");
-    } catch (e) {
-      addToast("Backtest failed", "error");
-    } finally {
-      setIsBacktesting(false);
     }
   }, [ticker, timeframe, addToast]);
 
@@ -401,6 +361,12 @@ export default function WarRoomDashboard() {
                   
                   if (marker === "SIGNAL_ENGINE") {
                     setSignal(content);
+                  } else if (marker === "BACKTEST") {
+                    setBacktestData(content);
+                  } else if (marker === "ICT") {
+                    setIctData(content);
+                  } else if (marker === "WHALE_ALERTS") {
+                    // Whale alerts stream early
                   } else if (marker === "ERROR") {
                     setError(content.text);
                   } else {
@@ -448,10 +414,10 @@ export default function WarRoomDashboard() {
           <button onClick={() => { setActiveTab("consensus"); if (!consensusData) runConsensus(); }} className={`p-3 rounded-xl transition-all ${activeTab === "consensus" ? "bg-amber-500/10 text-amber-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <Users className="h-6 w-6" />
           </button>
-          <button onClick={() => { setActiveTab("ict"); if (!ictData) runICT(); }} className={`p-3 rounded-xl transition-all ${activeTab === "ict" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}>
+          <button onClick={() => { setActiveTab("ict"); }} className={`p-3 rounded-xl transition-all ${activeTab === "ict" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <Bird className="h-6 w-6" />
           </button>
-          <button onClick={() => { setActiveTab("backtest"); if (!backtestData) runBacktest(); }} className={`p-3 rounded-xl transition-all ${activeTab === "backtest" ? "bg-orange-500/10 text-orange-400" : "text-[#4A4A6A] hover:text-white"}`}>
+          <button onClick={() => { setActiveTab("backtest"); }} className={`p-3 rounded-xl transition-all ${activeTab === "backtest" ? "bg-orange-500/10 text-orange-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <LineChart className="h-6 w-6" />
           </button>
           <button onClick={() => { setActiveTab("outcomes"); }} className={`p-3 rounded-xl transition-all ${activeTab === "outcomes" ? "bg-pink-500/10 text-pink-400" : "text-[#4A4A6A] hover:text-white"}`}>
@@ -623,7 +589,7 @@ export default function WarRoomDashboard() {
               ðŸ—³ï¸ CONSENSUS
             </button>
             <button
-              onClick={() => { setActiveTab("ict"); if (!ictData) runICT(); }}
+              onClick={() => { setActiveTab("ict"); }}
               className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
                 activeTab === "ict"
                   ? "text-emerald-400 border-b-2 border-emerald-500 bg-emerald-500/5"
@@ -633,7 +599,7 @@ export default function WarRoomDashboard() {
               ðŸ¦ ICT
             </button>
             <button
-              onClick={() => { setActiveTab("backtest"); if (!backtestData) runBacktest(); }}
+              onClick={() => { setActiveTab("backtest"); }}
               className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
                 activeTab === "backtest"
                   ? "text-orange-400 border-b-2 border-orange-500 bg-orange-500/5"

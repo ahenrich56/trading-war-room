@@ -642,11 +642,12 @@ async def generate_analysis_stream(req: AnalysisRequest):
     try:
         # ── 0. Fetch ALL data concurrently ──
         loop = asyncio.get_event_loop()
-        mtf_data, market_context, econ_calendar, whale_alerts = await asyncio.gather(
+        mtf_data, market_context, econ_calendar, whale_alerts, backtest_data = await asyncio.gather(
             loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf),
             loop.run_in_executor(executor, fetch_market_context),
             loop.run_in_executor(executor, get_economic_calendar),
             loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker),
+            loop.run_in_executor(executor, run_backtest, ticker, tf, 5),
         )
 
         mtf_summary = build_mtf_summary(mtf_data, ticker)
@@ -660,6 +661,17 @@ async def generate_analysis_stream(req: AnalysisRequest):
         if primary_df is not None and not primary_df.empty:
             ict_data = detect_ict_concepts(primary_df)
             ict_text = format_ict_for_ai(ict_data)
+        
+        # Stream ICT and Backtest data to the respective frontend panels immediately
+        yield emit("ICT", {"ticker": ticker, "timeframe": tf, "ict": ict_data})
+        yield emit("BACKTEST", backtest_data)
+
+        # ── Calculate Deterministic Strategy Score (Anchor) ──
+        strat_score, strat_dir, strat_reasons = calculate_strategy_score(
+            primary.get("EMA_9", 0), primary.get("EMA_21", 0), primary.get("RSI_14"),
+            primary.get("MACD_histogram"), primary.get("ADX"), primary.get("volume_ratio"),
+            current_price, primary.get("VWAP")
+        )
 
         full_data = f"{mtf_summary}\n\n{ict_text}\n\n{market_context}\n\n{econ_calendar}"
 
@@ -727,6 +739,7 @@ async def generate_analysis_stream(req: AnalysisRequest):
         # ── 3. TRADER & RISK ──
         trader_text = await ask_ai("TRADER_DECISION",
             f"Review bull/bear for {ticker}. Price: {current_price}. "
+            f"Strategy says: {strat_dir} (score {strat_score}). AI must agree with strategy direction or choose NO_TRADE. "
             f"ATR={primary.get('ATR_14', 'N/A')}, BB upper={primary.get('BB_upper', 'N/A')}, "
             f"BB lower={primary.get('BB_lower', 'N/A')}, VWAP={primary.get('VWAP', 'N/A')}. "
             f"Timeframe: {tf}. Be decisive.", 250, learning_context=learning_ctx)
@@ -734,7 +747,7 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         atr_val = primary.get("ATR_14", 0)
         risk_text = await ask_ai("RISK_MANAGER",
-            f"Review trader plan for {ticker} at {current_price}. ATR(14)={atr_val}. "
+            f"Review trader plan for {ticker} at {current_price} ({strat_dir}). ATR(14)={atr_val}. "
             f"Risk profile: {risk}.\n{market_context}\nApprove? Size recommendation.", 250, learning_context=learning_ctx)
         yield emit("RISK_MANAGER", {"text": risk_text})
 
@@ -756,13 +769,18 @@ CRITICAL PRICE DATA:
 - BB lower: {primary.get('BB_lower', 'N/A')}
 - ADX: {primary.get('ADX', 'N/A')}
 
+CRITICAL DETERMINISTIC STRATEGY FACTOR:
+- Strategy Direction: {strat_dir}
+- Strategy Score: {strat_score} (-100 to +100)
+- Strategy Drivers: {', '.join(strat_reasons)}
+
 RULES:
+- YOUR FINAL SIGNAL MUST EXACTLY MATCH THE STRATEGY DIRECTION ({strat_dir}).
+- IF THE RISK IS TOO HIGH OR CONTEXT IS BAD, YOU MAY DOWNGRADE TO 'NO_TRADE'.
+- YOU MAY NEVER CALL A 'LONG' IF THE STRATEGY IS 'SHORT', OR VICE VERSA.
 - Entry: within 0.5x ATR of {current_price}
 - SL: 1-2x ATR from entry
 - TP1: 1.5-2x ATR, TP2: 2.5-3x ATR
-- RSI>75 or <25: reduce confidence
-- ADX<20: ranging, reduce confidence
-- MTF conflict: reduce confidence
 
 Output ONLY valid JSON, no markdown:
 {{
@@ -1029,6 +1047,69 @@ class WatchlistRequest(BaseModel):
     tickers: list[str] = DEFAULT_WATCHLIST
     timeframe: str = "5m"
 
+def calculate_strategy_score(ema9, ema21, rsi, macd_hist, adx=None, vol_ratio=None, current_price=None, vwap=None):
+    """Deterministic, rule-based indicator scoring logic shared across AI signal, backtest, and watchlist."""
+    score = 0
+    signals = []
+
+    # EMA cross direction
+    if ema9 > ema21:
+        score += 20
+        signals.append("EMA9 > EMA21 (bullish)")
+    else:
+        score -= 20
+        signals.append("EMA9 < EMA21 (bearish)")
+
+    # RSI signals
+    if rsi is not None:
+        if rsi > 70:
+            score -= 15
+            signals.append(f"RSI overbought ({rsi})")
+        elif rsi < 30:
+            score += 15
+            signals.append(f"RSI oversold ({rsi})")
+        elif rsi > 55:
+            score += 10
+            signals.append(f"RSI bullish ({rsi})")
+        elif rsi < 45:
+            score -= 10
+            signals.append(f"RSI bearish ({rsi})")
+
+    # MACD histogram
+    if macd_hist is not None:
+        if macd_hist > 0:
+            score += 15
+            signals.append(f"MACD histogram positive ({macd_hist})")
+        else:
+            score -= 15
+            signals.append(f"MACD histogram negative ({macd_hist})")
+
+    # Optional enhancements
+    if adx is not None:
+        if adx > 25:
+            score = int(score * 1.3)
+            signals.append(f"Strong trend (ADX={adx})")
+        elif adx < 20:
+            score = int(score * 0.5)
+            signals.append(f"Weak trend (ADX={adx})")
+
+    if vol_ratio is not None and vol_ratio > 1.5:
+        score = int(score * 1.2)
+        signals.append(f"High volume ({vol_ratio}x)")
+
+    if current_price is not None and vwap is not None and vwap != current_price:
+        if current_price > vwap:
+            score += 5
+        else:
+            score -= 5
+
+    # Determine quick direction (-100 to +100)
+    score = max(-100, min(100, score))
+    direction = "LONG" if score > 15 else "SHORT" if score < -15 else "NO_TRADE"
+    
+    return score, direction, signals
+
+
 def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
     """Fast indicator-only scan (no AI) for watchlist ranking."""
     try:
@@ -1068,65 +1149,13 @@ def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
         except:
             vwap = current_price
 
-        # Score the opportunity (-100 to +100)
-        score = 0
-        signals = []
+        # Call unified strategy score function
+        score, direction, signals = calculate_strategy_score(
+            ema9, ema21, rsi, macd.get("MACD_histogram"),
+            adx=adx, vol_ratio=vol_ratio, current_price=current_price, vwap=vwap
+        )
 
-        # EMA cross direction
-        if ema9 > ema21:
-            score += 20
-            signals.append("EMA9 > EMA21 (bullish)")
-        else:
-            score -= 20
-            signals.append("EMA9 < EMA21 (bearish)")
-
-        # RSI signals
-        if rsi is not None:
-            if rsi > 70:
-                score -= 15
-                signals.append(f"RSI overbought ({rsi})")
-            elif rsi < 30:
-                score += 15
-                signals.append(f"RSI oversold ({rsi})")
-            elif rsi > 55:
-                score += 10
-                signals.append(f"RSI bullish ({rsi})")
-            elif rsi < 45:
-                score -= 10
-                signals.append(f"RSI bearish ({rsi})")
-
-        # MACD histogram
-        hist = macd.get("MACD_histogram")
-        if hist is not None:
-            if hist > 0:
-                score += 15
-                signals.append(f"MACD histogram positive ({hist})")
-            else:
-                score -= 15
-                signals.append(f"MACD histogram negative ({hist})")
-
-        # ADX trend strength
-        if adx is not None and adx > 25:
-            score = int(score * 1.3)  # Amplify score in strong trends
-            signals.append(f"Strong trend (ADX={adx})")
-        elif adx is not None and adx < 20:
-            score = int(score * 0.5)  # Dampen score in weak trends
-            signals.append(f"Weak trend (ADX={adx})")
-
-        # Volume confirmation
-        if vol_ratio > 1.5:
-            score = int(score * 1.2)
-            signals.append(f"High volume ({vol_ratio}x)")
-
-        # Price vs VWAP
-        if vwap:
-            if current_price > vwap:
-                score += 5
-            else:
-                score -= 5
-
-        # Determine quick direction
-        direction = "LONG" if score > 15 else "SHORT" if score < -15 else "NEUTRAL"
+        direction = "NEUTRAL" if direction == "NO_TRADE" else direction
 
         return {
             "ticker": ticker,
@@ -1342,27 +1371,18 @@ def run_backtest(ticker: str, timeframe: str, lookback_days: int) -> dict:
             low = window["Low"]
             volume = window["Volume"]
 
-            # Quick indicator scoring (same as watchlist scanner)
+            # Quick indicator scoring
             rsi = _rsi(close, 14)
             macd = _macd(close)
             ema9 = float(_ema(close, 9).iloc[-1])
             ema21 = float(_ema(close, 21).iloc[-1])
             atr = _atr(high, low, close, 14) or 1
-
-            score = 0
-            if ema9 > ema21: score += 20
-            else: score -= 20
-            if rsi and rsi > 70: score -= 15
-            elif rsi and rsi < 30: score += 15
-            elif rsi and rsi > 55: score += 10
-            elif rsi and rsi < 45: score -= 10
             hist = macd.get("MACD_histogram")
-            if hist and hist > 0: score += 15
-            elif hist: score -= 15
+
+            score, direction, _ = calculate_strategy_score(ema9, ema21, rsi, hist)
 
             # Only trade if score is strong enough
-            if abs(score) > 20:
-                direction = "LONG" if score > 0 else "SHORT"
+            if direction != "NO_TRADE":
                 entry_price = float(close.iloc[-1])
                 sl = entry_price - (1.5 * atr) if direction == "LONG" else entry_price + (1.5 * atr)
                 tp = entry_price + (2 * atr) if direction == "LONG" else entry_price - (2 * atr)
