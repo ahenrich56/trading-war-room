@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SignalPayload } from "@/components/types";
 import { MiniChart } from "@/components/MiniChart";
+import { TradingViewChart } from "@/components/TradingViewChart";
 import { AgentCard } from "@/components/AgentCard";
 import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { ConsensusPanel } from "@/components/ConsensusPanel";
@@ -654,8 +655,8 @@ export default function WarRoomDashboard() {
           </div>
 
           {activeTab === "chart" && (
-            <div className="p-4">
-              <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
+            <div className="p-0">
+              <TradingViewChart ticker={ticker} timeframe={timeframe} />
             </div>
           )}
 
