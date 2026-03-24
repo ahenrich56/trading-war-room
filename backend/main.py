@@ -14,11 +14,13 @@ import openai
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from whale_intel import TradFiWhaleDetector
 
 load_dotenv()
 
 app = FastAPI(title="AI Trading War Room Backend")
 executor = ThreadPoolExecutor(max_workers=4)
+whale_detector = TradFiWhaleDetector()
 
 app.add_middleware(
     CORSMiddleware,
@@ -640,10 +642,11 @@ async def generate_analysis_stream(req: AnalysisRequest):
     try:
         # ── 0. Fetch ALL data concurrently ──
         loop = asyncio.get_event_loop()
-        mtf_data, market_context, econ_calendar = await asyncio.gather(
+        mtf_data, market_context, econ_calendar, whale_alerts = await asyncio.gather(
             loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf),
             loop.run_in_executor(executor, fetch_market_context),
             loop.run_in_executor(executor, get_economic_calendar),
+            loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker),
         )
 
         mtf_summary = build_mtf_summary(mtf_data, ticker)
@@ -660,6 +663,15 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         full_data = f"{mtf_summary}\n\n{ict_text}\n\n{market_context}\n\n{econ_calendar}"
 
+        # ── 0a. Format Whale Alerts ──
+        whale_text = ""
+        if whale_alerts:
+            whale_text = f"═══ SMART MONEY / WHALE FLOW ALERTS ═══\n"
+            for w in whale_alerts:
+                whale_text += f"  [{w.alert_type.upper()}] {w.details['label']}! Magnitude: {w.magnitude:.1f}x normal volume. Price direction: {w.details['price_change_pct']}. Confidence: {w.confidence:.0f}/100.\n"
+            full_data += f"\n\n{whale_text}"
+            # Stream the whale alerts to frontend immediately
+            yield emit("WHALE_ALERTS", [w.__dict__ for w in whale_alerts])
         # ── 0b. Fetch self-learning context from outcomes DB ──
         learning_ctx = ""
         try:
@@ -1544,3 +1556,10 @@ async def get_outcomes():
 def health_check():
     return {"status": "ok", "service": "war-room-ai", "version": "5.0-sprint4"}
 
+
+@app.get("/api/v1/whale-alerts")
+async def get_whale_alerts(ticker: str):
+    """Fetch unusual volume and smart money alerts for a specific ticker."""
+    loop = asyncio.get_event_loop()
+    alerts = await loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker.upper())
+    return {"ticker": ticker.upper(), "alerts": [w.__dict__ for w in alerts]}

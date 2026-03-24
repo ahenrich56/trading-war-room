@@ -15,8 +15,11 @@ import { ConsensusPanel } from "@/components/ConsensusPanel";
 import { ICTPanel } from "@/components/ICTPanel";
 import { BacktestPanel } from "@/components/BacktestPanel";
 import { TermTooltip } from "@/components/TermTooltip";
+import { OutcomesPanel } from "@/components/OutcomesPanel";
+import { WhaleAlertsPanel } from "@/components/WhaleAlertsPanel";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Activity, LayoutDashboard, Users, Bird, LineChart, Target, Settings, X, Menu } from "lucide-react";
 
 
 
@@ -63,6 +66,9 @@ export default function WarRoomDashboard() {
   const [backtestData, setBacktestData] = useState<any>(null);
   const [isIctRunning, setIsIctRunning] = useState(false);
   const [isBacktesting, setIsBacktesting] = useState(false);
+
+  // Mobile menu state
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Poll backend health
   useEffect(() => {
@@ -430,138 +436,149 @@ export default function WarRoomDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900">
-      <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
+    <div className="flex h-screen bg-[#05050A] text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900 overflow-hidden">
+      {/* Sidebar */}
+      <aside className="w-20 bg-[#0A0A15] border-r border-white/5 flex flex-col items-center py-6 gap-8 z-50 flex-shrink-0 relative">
+        <Activity className="h-8 w-8 text-[#4A4A6A] mb-4 hover:text-cyan-400 transition-colors" />
+        <div className="flex flex-col gap-6 w-full items-center">
+          <button onClick={() => setActiveTab("chart")} className={`p-3 rounded-xl transition-all ${activeTab === "chart" ? "bg-cyan-500/10 text-cyan-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <LayoutDashboard className="h-6 w-6" />
+          </button>
+          <button onClick={() => { setActiveTab("consensus"); if (!consensusData) runConsensus(); }} className={`p-3 rounded-xl transition-all ${activeTab === "consensus" ? "bg-amber-500/10 text-amber-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <Users className="h-6 w-6" />
+          </button>
+          <button onClick={() => { setActiveTab("ict"); if (!ictData) runICT(); }} className={`p-3 rounded-xl transition-all ${activeTab === "ict" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <Bird className="h-6 w-6" />
+          </button>
+          <button onClick={() => { setActiveTab("backtest"); if (!backtestData) runBacktest(); }} className={`p-3 rounded-xl transition-all ${activeTab === "backtest" ? "bg-orange-500/10 text-orange-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <LineChart className="h-6 w-6" />
+          </button>
+          <button onClick={() => { setActiveTab("outcomes"); }} className={`p-3 rounded-xl transition-all ${activeTab === "outcomes" ? "bg-pink-500/10 text-pink-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <Target className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="mt-auto">
+          <Settings className="h-6 w-6 text-[#4A4A6A] hover:text-white cursor-pointer transition-colors" />
+        </div>
+      </aside>
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-b from-slate-900 to-slate-950 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-4">
-        <div className="flex items-center justify-between mb-3 sm:mb-0">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div 
-              className={`h-3 w-3 rounded-full ${
-                backendStatus === "ok" ? "bg-cyan-500 animate-pulse" : 
-                backendStatus === "checking" ? "bg-amber-500 animate-pulse" : 
-                "bg-red-500"
-              }`} 
-              title={backendStatus === "ok" ? "Backend connected" : backendStatus === "checking" ? "Checking connection..." : "Backend offline"}
-            />
-            <h1 className="text-base sm:text-xl font-bold text-white tracking-wider flex items-center gap-2">
-              AI TRADING WAR ROOM
-              {backendStatus === "error" && (
-                <span className="text-xs text-red-500 font-normal uppercase tracking-normal hidden sm:inline">(Offline)</span>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
+        <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
+
+        {/* Header */}
+        <header className="shrink-0 sticky top-0 z-50 border-b border-white/5 bg-[#05050A]/90 backdrop-blur-md px-6 py-4">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-extrabold text-white tracking-widest uppercase flex items-center gap-2">
+                  {activeTab === "chart" ? "AI TRADING WAR ROOM" :
+                   activeTab === "backtest" ? "BACKTEST STUDIO" :
+                   activeTab === "ict" ? "SMART MONEY CONCEPTS" :
+                   activeTab === "consensus" ? "CONSENSUS ENGINE" :
+                   "OUTCOMES & PERFORMANCE"}
+                   {backendStatus === "error" && (
+                    <span className="text-xs text-red-500 font-normal uppercase tracking-normal hidden sm:inline">(Offline)</span>
+                  )}
+                </h1>
+                <div 
+                  className={`h-2 w-2 rounded-full ${
+                    backendStatus === "ok" ? "bg-cyan-500 animate-pulse" : 
+                    backendStatus === "checking" ? "bg-amber-500 animate-pulse" : 
+                    "bg-red-500"
+                  }`} 
+                  title={backendStatus === "ok" ? "Backend connected" : backendStatus === "checking" ? "Checking connection..." : "Backend offline"}
+                />
+              </div>
+              <span className="text-sm text-[#8A8AAA]">
+                 {activeTab === "chart" ? "Real-Time Multi-Agent Analysis" :
+                  activeTab === "backtest" ? "Historical Strategy Optimization & Win-Rates" :
+                  activeTab === "ict" ? "Real-Time Liquidity, FVG & Order Block Detection" :
+                  "Institutional Grade Market Tracking"}
+              </span>
+            </div>
+
+            <button 
+              className="xl:hidden absolute top-4 right-4 text-[#4A4A6A] hover:text-white p-2"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            >
+              {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+          
+            <div className={`${isMobileMenuOpen ? "flex" : "hidden"} xl:flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-center mt-3 xl:mt-0`}>
+              <div className="flex items-center justify-between sm:justify-start space-x-2 bg-slate-900 border border-white/10 px-3 py-1.5 rounded-md">
+                <Switch id="demo-mode" checked={demoMode} onCheckedChange={setDemoMode} />
+                <Label htmlFor="demo-mode" className="text-xs text-slate-300 font-bold cursor-pointer hover:text-cyan-400 transition-colors">
+                  <TermTooltip term="Demo Mode" description="Uses simulated offline data for testing UI without backend API keys.">
+                    DEMO DATA
+                  </TermTooltip>
+                </Label>
+              </div>
+              <Input 
+                value={ticker} 
+                onChange={e => setTicker(e.target.value.toUpperCase())}
+                placeholder="TICKER" 
+                className="w-20 sm:w-24 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold text-xs sm:text-sm"
+              />
+              <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
+                <SelectTrigger className="w-20 sm:w-24 bg-black/50 border-white/20 text-xs sm:text-sm">
+                  <SelectValue placeholder="TF" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-900 border-white/20 text-white">
+                  <SelectItem value="1m">1m</SelectItem>
+                  <SelectItem value="5m">5m</SelectItem>
+                  <SelectItem value="15m">15m</SelectItem>
+                  <SelectItem value="1h">1h</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
+                <SelectTrigger className="w-28 sm:w-32 bg-black/50 border-white/20 text-xs sm:text-sm">
+                  <SelectValue placeholder="Risk" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-900 border-white/20 text-white">
+                  <SelectItem value="conservative">Conservative</SelectItem>
+                  <SelectItem value="standard">Standard</SelectItem>
+                  <SelectItem value="aggressive">Aggressive</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button 
+                onClick={runAnalysis} 
+                disabled={isRunning}
+                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-[0_0_15px_rgba(6,182,212,0.4)] hover:shadow-[0_0_25px_rgba(6,182,212,0.6)] hover:scale-105 transition-all duration-300 border border-cyan-400/30"
+              >
+                {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
+              </Button>
+              {isRunning && (
+                <Button 
+                  onClick={cancelAnalysis}
+                  variant="outline"
+                  className="bg-black/50 border-red-500/50 text-red-500 hover:bg-red-500/20 hover:text-red-400 font-bold text-xs shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all duration-300 flex items-center gap-1"
+                >
+                  <X className="h-3 w-3" /> CANCEL
+                </Button>
               )}
-            </h1>
-            <Badge variant="outline" className="text-cyan-400 border-cyan-500/30 bg-cyan-500/5 text-[10px]">v3.0</Badge>
+            </div>
           </div>
-        </div>
-        
-        <div className="flex flex-wrap gap-2 sm:gap-4 items-center">
-          <div className="flex items-center space-x-2 mr-4 bg-slate-900 border border-white/10 px-3 py-1.5 rounded-md">
-            <Switch id="demo-mode" checked={demoMode} onCheckedChange={setDemoMode} />
-            <Label htmlFor="demo-mode" className="text-xs text-slate-300 font-bold cursor-pointer hover:text-cyan-400 transition-colors">
-              <TermTooltip term="Demo Mode" description="Uses simulated offline data for testing UI without backend API keys.">
-                DEMO DATA
-              </TermTooltip>
-            </Label>
+        </header>
+
+        {/* Progress Bar */}
+        {isRunning && (
+          <div className="shrink-0 px-6 py-2 bg-black/40 border-b border-white/5 flex items-center gap-4">
+            <span className="text-xs text-cyan-500 w-48 truncate flex-shrink-0">
+              {currentStage ? `[${currentStage}]` : "INITIALIZING..."}
+            </span>
+            <Progress value={progress} className="h-1 bg-white/10 [&>div]:bg-cyan-500 flex-1" />
           </div>
-          <Input 
-            value={ticker} 
-            onChange={e => setTicker(e.target.value.toUpperCase())}
-            placeholder="TICKER" 
-            className="w-20 sm:w-24 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold text-xs sm:text-sm"
-          />
-          <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
-            <SelectTrigger className="w-20 sm:w-24 bg-black/50 border-white/20 text-xs sm:text-sm">
-              <SelectValue placeholder="TF" />
-            </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-white/20 text-white">
-              <SelectItem value="1m">1m</SelectItem>
-              <SelectItem value="5m">5m</SelectItem>
-              <SelectItem value="15m">15m</SelectItem>
-              <SelectItem value="1h">1h</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
-            <SelectTrigger className="w-28 sm:w-32 bg-black/50 border-white/20 text-xs sm:text-sm">
-              <SelectValue placeholder="Risk" />
-            </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-white/20 text-white">
-              <SelectItem value="conservative">Conservative</SelectItem>
-              <SelectItem value="standard">Standard</SelectItem>
-              <SelectItem value="aggressive">Aggressive</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button 
-            onClick={runAnalysis} 
-            disabled={isRunning}
-            className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs sm:text-sm"
-          >
-            {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
-          </Button>
-          {isRunning && (
-            <Button 
-              onClick={cancelAnalysis}
-              variant="outline"
-              className="border-red-500/50 text-red-400 hover:bg-red-500/10 font-bold text-xs"
-            >
-              âœ• CANCEL
-            </Button>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button 
-              onClick={scanWatchlist} 
-              disabled={isScanning}
-              variant="outline"
-              className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10 font-bold text-xs"
-            >
-              {isScanning ? "SCANNING..." : "ðŸ“¡ SCAN"}
-            </Button>
-            <Button 
-              onClick={runConsensus} 
-              disabled={isConsensusRunning}
-              variant="outline"
-              className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 font-bold text-xs"
-            >
-              {isConsensusRunning ? "VOTING..." : "ðŸ—³ï¸ CONSENSUS"}
-            </Button>
-            <Button 
-              onClick={runICT} 
-              disabled={isIctRunning}
-              variant="outline"
-              className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs"
-            >
-              {isIctRunning ? "READING..." : "ðŸ¦ ICT"}
-            </Button>
-            <Button 
-              onClick={runBacktest} 
-              disabled={isBacktesting}
-              variant="outline"
-              className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 font-bold text-xs"
-            >
-              {isBacktesting ? "TESTING..." : "ðŸ“ˆ BACKTEST"}
-            </Button>
+        )}
+
+        {error && (
+          <div className="shrink-0 m-6 p-4 border border-red-500/50 bg-red-500/10 text-red-400 rounded-md">
+            [SYSTEM ERROR]: {error}
           </div>
-        </div>
-      </header>
+        )}
 
-      {/* Progress Bar */}
-      {isRunning && (
-        <div className="px-6 py-2 bg-black/40 border-b border-white/5 flex items-center gap-4">
-          <span className="text-xs text-cyan-500 w-48 truncate">
-            {currentStage ? `[${currentStage}]` : "INITIALIZING..."}
-          </span>
-          <Progress value={progress} className="h-1 bg-white/10 [&>div]:bg-cyan-500" />
-        </div>
-      )}
-
-      {error && (
-        <div className="m-6 p-4 border border-red-500/50 bg-red-500/10 text-red-400 rounded-md">
-          [SYSTEM ERROR]: {error}
-        </div>
-      )}
-
-      <main className="p-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
-        {/* â•â•â• CHART + SIGNAL HISTORY TABS â•â•â• */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        {/* ═══ CHART + SIGNAL HISTORY TABS ═══ */}
         <div className="border border-white/10 rounded-lg bg-black/30 backdrop-blur-sm overflow-hidden">
           <div className="flex overflow-x-auto scrollbar-hide border-b border-white/10">
             <button
@@ -572,7 +589,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              ðŸ“Š LIVE CHART
+              📊 LIVE CHART
             </button>
             <button
               onClick={() => setActiveTab("history")}
@@ -582,7 +599,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              ðŸ“œ HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
+              📜 HISTORY {signalHistory.length > 0 && <span className="ml-2 px-1.5 py-0.5 bg-cyan-500/20 rounded text-[10px]">{signalHistory.length}</span>}
             </button>
             <button
               onClick={() => { setActiveTab("watchlist"); if (!watchlistData) scanWatchlist(); }}
@@ -592,7 +609,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              ðŸ“¡ WATCHLIST
+              📡 WATCHLIST
             </button>
             <button
               onClick={() => setActiveTab("consensus")}
@@ -986,6 +1003,7 @@ export default function WarRoomDashboard() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
