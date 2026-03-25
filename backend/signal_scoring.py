@@ -1,0 +1,516 @@
+"""
+Enhanced Signal Scoring Engine.
+
+Replaces the simplistic calculate_strategy_score with a 5-factor confluence
+model that adapts to market regime, grades signals (A+/A/B/C/F), and uses
+order flow as a final gate to filter false signals.
+
+Factors:
+  1. TREND     — EMA alignment, price vs VWAP, EMA 50/200 position
+  2. MOMENTUM  — RSI, MACD histogram, Stochastic RSI
+  3. STRUCTURE  — BOS/CHoCH, order block proximity, FVG alignment
+  4. ORDER_FLOW — Delta bias, CVD trend, divergences, absorption
+  5. VOLUME     — Volume ratio, stacked imbalances
+"""
+
+
+# ═══════════════════════════════════════════════════════════
+#  MARKET REGIME DETECTION
+# ═══════════════════════════════════════════════════════════
+
+def detect_market_regime(adx, atr_pct, volume_ratio, cvd_trend, rsi):
+    """
+    Classify current market into a regime for dynamic weight adjustment.
+
+    Returns one of: TRENDING_UP, TRENDING_DOWN, RANGING, HIGH_VOLATILITY, LOW_LIQUIDITY
+    """
+    if adx is None:
+        adx = 20
+    if atr_pct is None:
+        atr_pct = 0.5
+    if volume_ratio is None:
+        volume_ratio = 1.0
+    if rsi is None:
+        rsi = 50
+
+    # High volatility override
+    if atr_pct > 1.5 and volume_ratio > 2.0:
+        return "HIGH_VOLATILITY"
+
+    # Low liquidity
+    if volume_ratio < 0.4:
+        return "LOW_LIQUIDITY"
+
+    # Trending
+    if adx > 25:
+        if rsi > 55 and cvd_trend in ("RISING", "FLAT"):
+            return "TRENDING_UP"
+        elif rsi < 45 and cvd_trend in ("FALLING", "FLAT"):
+            return "TRENDING_DOWN"
+        # Strong ADX but mixed signals — still trending in the direction of momentum
+        if rsi > 50:
+            return "TRENDING_UP"
+        return "TRENDING_DOWN"
+
+    # Ranging
+    return "RANGING"
+
+
+# ═══════════════════════════════════════════════════════════
+#  DYNAMIC WEIGHT PROFILES
+# ═══════════════════════════════════════════════════════════
+
+REGIME_WEIGHTS = {
+    "TRENDING_UP": {
+        "trend": 30, "momentum": 25, "structure": 15, "order_flow": 20, "volume": 10,
+    },
+    "TRENDING_DOWN": {
+        "trend": 30, "momentum": 25, "structure": 15, "order_flow": 20, "volume": 10,
+    },
+    "RANGING": {
+        "trend": 10, "momentum": 30, "structure": 25, "order_flow": 20, "volume": 15,
+    },
+    "HIGH_VOLATILITY": {
+        "trend": 15, "momentum": 20, "structure": 15, "order_flow": 30, "volume": 20,
+    },
+    "LOW_LIQUIDITY": {
+        "trend": 20, "momentum": 25, "structure": 20, "order_flow": 15, "volume": 20,
+    },
+}
+
+
+# ═══════════════════════════════════════════════════════════
+#  FACTOR SCORING FUNCTIONS
+# ═══════════════════════════════════════════════════════════
+
+def _score_trend(ema9, ema21, ema50, ema200, current_price, vwap):
+    """Score trend factor: -100 to +100."""
+    score = 0
+    signals = []
+
+    # EMA 9/21 cross (primary short-term trend)
+    if ema9 is not None and ema21 is not None:
+        if ema9 > ema21:
+            score += 30
+            signals.append("EMA9 > EMA21 (bullish cross)")
+        else:
+            score -= 30
+            signals.append("EMA9 < EMA21 (bearish cross)")
+
+    # EMA 50/200 alignment (macro trend)
+    if ema50 is not None and ema200 is not None:
+        if ema50 > ema200:
+            score += 20
+            signals.append("EMA50 > EMA200 (golden cross)")
+        else:
+            score -= 20
+            signals.append("EMA50 < EMA200 (death cross)")
+
+    # Price vs VWAP
+    if current_price is not None and vwap is not None and vwap > 0:
+        if current_price > vwap:
+            score += 15
+            signals.append("Price above VWAP")
+        else:
+            score -= 15
+            signals.append("Price below VWAP")
+
+    # EMA alignment quality (all EMAs stacked in order)
+    if all(v is not None for v in [ema9, ema21, ema50, ema200]):
+        if ema9 > ema21 > ema50 > ema200:
+            score += 35
+            signals.append("Perfect bullish EMA stack")
+        elif ema9 < ema21 < ema50 < ema200:
+            score -= 35
+            signals.append("Perfect bearish EMA stack")
+
+    return max(-100, min(100, score)), signals
+
+
+def _score_momentum(rsi, macd_hist, stoch_k, stoch_d):
+    """Score momentum factor: -100 to +100."""
+    score = 0
+    signals = []
+
+    # RSI
+    if rsi is not None:
+        if rsi > 70:
+            score -= 25
+            signals.append(f"RSI overbought ({rsi:.1f})")
+        elif rsi < 30:
+            score += 25
+            signals.append(f"RSI oversold ({rsi:.1f})")
+        elif rsi > 60:
+            score += 15
+            signals.append(f"RSI bullish ({rsi:.1f})")
+        elif rsi < 40:
+            score -= 15
+            signals.append(f"RSI bearish ({rsi:.1f})")
+
+    # MACD histogram
+    if macd_hist is not None:
+        if macd_hist > 0:
+            score += 25
+            signals.append(f"MACD histogram positive ({macd_hist:.2f})")
+        else:
+            score -= 25
+            signals.append(f"MACD histogram negative ({macd_hist:.2f})")
+
+    # Stochastic RSI
+    if stoch_k is not None and stoch_d is not None:
+        if stoch_k > 80 and stoch_d > 80:
+            score -= 20
+            signals.append(f"StochRSI overbought (K={stoch_k:.1f})")
+        elif stoch_k < 20 and stoch_d < 20:
+            score += 20
+            signals.append(f"StochRSI oversold (K={stoch_k:.1f})")
+        elif stoch_k > stoch_d:
+            score += 10
+            signals.append("StochRSI K > D (bullish)")
+        else:
+            score -= 10
+            signals.append("StochRSI K < D (bearish)")
+
+    return max(-100, min(100, score)), signals
+
+
+def _score_structure(ict_data, current_price):
+    """Score market structure factor from ICT data: -100 to +100."""
+    score = 0
+    signals = []
+
+    if not ict_data or not current_price:
+        return 0, ["No ICT data available"]
+
+    # BOS / CHoCH direction
+    structure = ict_data.get("structure", [])
+    if structure:
+        recent = structure[-1] if structure else {}
+        stype = recent.get("type", "")
+        if "bullish" in stype.lower():
+            score += 30
+            signals.append(f"Bullish {stype}")
+        elif "bearish" in stype.lower():
+            score -= 30
+            signals.append(f"Bearish {stype}")
+
+    # Order block proximity
+    order_blocks = ict_data.get("order_blocks", [])
+    for ob in order_blocks[-3:]:
+        ob_high = ob.get("high", 0)
+        ob_low = ob.get("low", 0)
+        ob_type = ob.get("type", "")
+
+        if ob_low <= current_price <= ob_high:
+            if "bullish" in ob_type.lower():
+                score += 25
+                signals.append(f"Price at bullish OB ({ob_low:.2f}-{ob_high:.2f})")
+            elif "bearish" in ob_type.lower():
+                score -= 25
+                signals.append(f"Price at bearish OB ({ob_low:.2f}-{ob_high:.2f})")
+            break
+
+    # FVG alignment
+    fvgs = ict_data.get("fvgs", [])
+    for fvg in fvgs[-3:]:
+        fvg_high = fvg.get("high", 0)
+        fvg_low = fvg.get("low", 0)
+        fvg_type = fvg.get("type", "")
+
+        if fvg_low <= current_price <= fvg_high:
+            if "bullish" in fvg_type.lower():
+                score += 15
+                signals.append(f"Price filling bullish FVG")
+            elif "bearish" in fvg_type.lower():
+                score -= 15
+                signals.append(f"Price filling bearish FVG")
+            break
+
+    return max(-100, min(100, score)), signals
+
+
+def _score_order_flow(order_flow_summary):
+    """Score order flow factor: -100 to +100."""
+    score = 0
+    signals = []
+
+    if not order_flow_summary:
+        return 0, ["No order flow data"]
+
+    summary = order_flow_summary.get("summary", {})
+
+    # Delta bias
+    bias = summary.get("overall_delta_bias", "NEUTRAL")
+    if bias == "BULLISH":
+        score += 30
+        signals.append("Delta bias BULLISH (last 10 bars)")
+    elif bias == "BEARISH":
+        score -= 30
+        signals.append("Delta bias BEARISH (last 10 bars)")
+
+    # CVD trend
+    cvd = summary.get("cvd_trend", "FLAT")
+    if cvd == "RISING":
+        score += 25
+        signals.append("CVD trend RISING")
+    elif cvd == "FALLING":
+        score -= 25
+        signals.append("CVD trend FALLING")
+
+    # Divergences (strong contra-signals)
+    divergences = order_flow_summary.get("divergences", [])
+    for div in divergences[-2:]:
+        if div.get("type") == "BEARISH_DIVERGENCE":
+            score -= 20
+            signals.append(f"BEARISH CVD divergence at {div.get('price_level', '?')}")
+        elif div.get("type") == "BULLISH_DIVERGENCE":
+            score += 20
+            signals.append(f"BULLISH CVD divergence at {div.get('price_level', '?')}")
+
+    # Absorption zones
+    absorptions = order_flow_summary.get("absorptions", [])
+    for abs_zone in absorptions[-2:]:
+        if abs_zone.get("type") == "BULLISH_ABSORPTION":
+            score += 15
+            signals.append(f"Bullish absorption at {abs_zone.get('price', '?')}")
+        elif abs_zone.get("type") == "BEARISH_ABSORPTION":
+            score -= 15
+            signals.append(f"Bearish absorption at {abs_zone.get('price', '?')}")
+
+    # VWAP deviation (mean-reversion risk)
+    vwap_dev = summary.get("vwap_deviation", 0)
+    if abs(vwap_dev) > 2:
+        # Extended — contra-signal for continued direction
+        if vwap_dev > 2:
+            score -= 10
+            signals.append(f"Extended above VWAP ({vwap_dev}σ) — mean reversion risk")
+        elif vwap_dev < -2:
+            score += 10
+            signals.append(f"Extended below VWAP ({vwap_dev}σ) — bounce potential")
+
+    return max(-100, min(100, score)), signals
+
+
+def _score_volume(volume_ratio, stacked_imbalances):
+    """Score volume factor: -100 to +100."""
+    score = 0
+    signals = []
+
+    # Volume ratio
+    if volume_ratio is not None:
+        if volume_ratio > 2.0:
+            score += 30
+            signals.append(f"High volume ({volume_ratio:.1f}x avg)")
+        elif volume_ratio > 1.5:
+            score += 15
+            signals.append(f"Above-avg volume ({volume_ratio:.1f}x)")
+        elif volume_ratio < 0.5:
+            score -= 20
+            signals.append(f"Low volume ({volume_ratio:.1f}x) — weak conviction")
+
+    # Stacked imbalances
+    if stacked_imbalances:
+        for imb in stacked_imbalances[-2:]:
+            direction = imb.get("direction", "")
+            bars = imb.get("bars_count", 0)
+            if direction == "BUY":
+                score += 25
+                signals.append(f"Stacked BUY imbalance ({bars} bars)")
+            elif direction == "SELL":
+                score -= 25
+                signals.append(f"Stacked SELL imbalance ({bars} bars)")
+
+    return max(-100, min(100, score)), signals
+
+
+# ═══════════════════════════════════════════════════════════
+#  CONFLUENCE EVALUATOR
+# ═══════════════════════════════════════════════════════════
+
+def _determine_direction(weighted_score):
+    """Convert weighted score to direction with tighter thresholds."""
+    if weighted_score > 20:
+        return "LONG"
+    elif weighted_score < -20:
+        return "SHORT"
+    return "NO_TRADE"
+
+
+def _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence):
+    """
+    Grade signal quality based on confluence.
+
+    A+ : 4-5 factors aligned, score > 50, no contra-divergences
+    A  : 3-4 factors aligned, score > 35
+    B  : 2-3 factors, score > 20
+    C  : Mixed signals or weak alignment
+    F  : Order flow contradicts or too many opposing factors
+    """
+    abs_score = abs(weighted_score)
+
+    if has_divergence and not order_flow_agrees:
+        return "F"
+
+    if factors_aligned >= 4 and abs_score > 50 and order_flow_agrees:
+        return "A+"
+    elif factors_aligned >= 3 and abs_score > 35:
+        return "A"
+    elif factors_aligned >= 2 and abs_score > 20:
+        return "B"
+    elif abs_score > 10:
+        return "C"
+    return "F"
+
+
+def calculate_enhanced_score(
+    indicators: dict,
+    ict_data: dict = None,
+    order_flow_data: dict = None,
+    mtf_confluence: dict = None,
+):
+    """
+    Enhanced multi-factor confluence scoring.
+
+    Args:
+        indicators: dict from compute_indicators() — RSI, EMA, MACD, ADX, etc.
+        ict_data: dict from detect_ict_concepts() — BOS, CHoCH, OBs, FVGs
+        order_flow_data: dict from compute_order_flow_summary() — delta, CVD, profile
+        mtf_confluence: dict from compute_mtf_order_flow() — MTF multiplier
+
+    Returns:
+        dict with score, direction, signals, grade, regime, confluences, etc.
+    """
+    # Extract indicator values
+    ema9 = indicators.get("EMA_9")
+    ema21 = indicators.get("EMA_21")
+    ema50 = indicators.get("EMA_50")
+    ema200 = indicators.get("EMA_200")
+    rsi = indicators.get("RSI_14")
+    macd_hist = indicators.get("MACD_histogram")
+    adx = indicators.get("ADX")
+    volume_ratio = indicators.get("volume_ratio")
+    current_price = indicators.get("current_price")
+    vwap = indicators.get("VWAP")
+    stoch_k = indicators.get("StochRSI_K")
+    stoch_d = indicators.get("StochRSI_D")
+    atr = indicators.get("ATR_14")
+
+    # ATR as percentage for regime detection
+    atr_pct = (atr / current_price * 100) if atr and current_price and current_price > 0 else 0.5
+
+    # Order flow summary
+    of_summary = order_flow_data or {}
+    cvd_trend = of_summary.get("summary", {}).get("cvd_trend", "FLAT")
+    stacked_imbalances = of_summary.get("stacked_imbalances", [])
+
+    # 1. Detect regime
+    regime = detect_market_regime(adx, atr_pct, volume_ratio, cvd_trend, rsi)
+    weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["RANGING"])
+
+    # 2. Score each factor
+    trend_score, trend_signals = _score_trend(ema9, ema21, ema50, ema200, current_price, vwap)
+    momentum_score, momentum_signals = _score_momentum(rsi, macd_hist, stoch_k, stoch_d)
+    structure_score, structure_signals = _score_structure(ict_data, current_price)
+    of_score, of_signals = _score_order_flow(of_summary)
+    vol_score, vol_signals = _score_volume(volume_ratio, stacked_imbalances)
+
+    # 3. Weighted composite score
+    weighted_score = (
+        trend_score * weights["trend"] / 100 +
+        momentum_score * weights["momentum"] / 100 +
+        structure_score * weights["structure"] / 100 +
+        of_score * weights["order_flow"] / 100 +
+        vol_score * weights["volume"] / 100
+    )
+    # 3b. Apply MTF order flow confluence multiplier
+    mtf_multiplier = 1.0
+    mtf_label = "NEUTRAL"
+    if mtf_confluence:
+        mtf_multiplier = mtf_confluence.get("confluence_multiplier", 1.0)
+        mtf_label = mtf_confluence.get("confluence_label", "NEUTRAL")
+
+    weighted_score = weighted_score * mtf_multiplier
+    weighted_score = round(weighted_score, 1)
+
+    # 4. Count aligned factors
+    factor_scores = {
+        "trend": trend_score,
+        "momentum": momentum_score,
+        "structure": structure_score,
+        "order_flow": of_score,
+        "volume": vol_score,
+    }
+
+    direction = _determine_direction(weighted_score)
+
+    if direction == "LONG":
+        factors_aligned = sum(1 for s in factor_scores.values() if s > 10)
+    elif direction == "SHORT":
+        factors_aligned = sum(1 for s in factor_scores.values() if s < -10)
+    else:
+        factors_aligned = 0
+
+    # 5. Order flow gate — check for contradictions
+    order_flow_agrees = True
+    has_divergence = False
+
+    divergences = of_summary.get("divergences", [])
+    if divergences:
+        has_divergence = True
+
+    if direction == "LONG" and of_score < -20:
+        order_flow_agrees = False
+    elif direction == "SHORT" and of_score > 20:
+        order_flow_agrees = False
+
+    # If order flow strongly contradicts, downgrade to NO_TRADE
+    if not order_flow_agrees and abs(of_score) > 40:
+        direction = "NO_TRADE"
+
+    # 6. Grade signal
+    grade = _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence)
+
+    # Downgrade direction on F grade
+    if grade == "F":
+        direction = "NO_TRADE"
+
+    # 7. Build confluences list for frontend
+    confluences = []
+    for name, (fscore, fsignals) in [
+        ("TREND", (trend_score, trend_signals)),
+        ("MOMENTUM", (momentum_score, momentum_signals)),
+        ("STRUCTURE", (structure_score, structure_signals)),
+        ("ORDER_FLOW", (of_score, of_signals)),
+        ("VOLUME", (vol_score, vol_signals)),
+    ]:
+        fdir = "BULLISH" if fscore > 10 else "BEARISH" if fscore < -10 else "NEUTRAL"
+        confluences.append({
+            "name": name,
+            "score": fscore,
+            "direction": fdir,
+            "weight": weights[name.lower()],
+            "signals": fsignals,
+        })
+
+    # Combine all signals
+    all_signals = trend_signals + momentum_signals + structure_signals + of_signals + vol_signals
+
+    # Add MTF confluence signal if relevant
+    if mtf_multiplier != 1.0:
+        all_signals.append(f"MTF Order Flow: {mtf_label} ({mtf_multiplier}x multiplier)")
+
+    final_score = max(-100, min(100, int(weighted_score)))
+
+    return {
+        "score": final_score,
+        "direction": direction,
+        "signals": all_signals,
+        "grade": grade,
+        "regime": regime,
+        "factors_aligned": factors_aligned,
+        "order_flow_agrees": order_flow_agrees,
+        "confluences": confluences,
+        "factor_scores": factor_scores,
+        "mtf_confluence_multiplier": mtf_multiplier,
+        "mtf_confluence_label": mtf_label,
+    }

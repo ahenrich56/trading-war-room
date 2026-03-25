@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SignalPayload } from "@/components/types";
+import { SignalPayload, OrderFlowData, MtfOrderFlowData } from "@/components/types";
 import { MiniChart } from "@/components/MiniChart";
 import { TradingViewChart } from "@/components/TradingViewChart";
 import { AgentCard } from "@/components/AgentCard";
@@ -18,9 +18,10 @@ import { BacktestPanel } from "@/components/BacktestPanel";
 import { TermTooltip } from "@/components/TermTooltip";
 import { OutcomesPanel } from "@/components/OutcomesPanel";
 import { WhaleAlertsPanel } from "@/components/WhaleAlertsPanel";
+import { OrderFlowPanel } from "@/components/OrderFlowPanel";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Activity, LayoutDashboard, Users, Bird, LineChart, Target, Settings, X, Menu } from "lucide-react";
+import { Activity, LayoutDashboard, Users, Bird, LineChart, Target, Settings, X, Menu, BarChart3 } from "lucide-react";
 
 
 
@@ -54,7 +55,7 @@ export default function WarRoomDashboard() {
   // Chart + History state
   const [chartData, setChartData] = useState<any>(null);
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
-  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest" | "outcomes">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest" | "outcomes" | "orderflow">("chart");
 
   // Watchlist + Consensus state
   const [watchlistData, setWatchlistData] = useState<any>(null);
@@ -62,9 +63,11 @@ export default function WarRoomDashboard() {
   const [isScanning, setIsScanning] = useState(false);
   const [isConsensusRunning, setIsConsensusRunning] = useState(false);
 
-  // ICT + Backtest state
+  // ICT + Backtest + Order Flow state
   const [ictData, setIctData] = useState<any>(null);
   const [backtestData, setBacktestData] = useState<any>(null);
+  const [orderFlowData, setOrderFlowData] = useState<OrderFlowData | null>(null);
+  const [mtfOrderFlowData, setMtfOrderFlowData] = useState<MtfOrderFlowData | null>(null);
   const [isIctRunning, setIsIctRunning] = useState(false);
   const [isBacktesting, setIsBacktesting] = useState(false);
 
@@ -103,9 +106,9 @@ export default function WarRoomDashboard() {
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("warroom_watchlist");
-      return saved ? JSON.parse(saved) : ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"];
+      return saved ? JSON.parse(saved) : ["NQ1", "ES1", "YM1", "RTY1", "GC1", "CL1", "SI1", "ZB1"];
     }
-    return ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"];
+    return ["NQ1", "ES1", "YM1", "RTY1", "GC1", "CL1", "SI1", "ZB1"];
   });
   const [newWatchlistTicker, setNewWatchlistTicker] = useState("");
 
@@ -374,6 +377,10 @@ export default function WarRoomDashboard() {
                     setBacktestData(content);
                   } else if (marker === "ICT") {
                     setIctData(content);
+                  } else if (marker === "ORDER_FLOW") {
+                    setOrderFlowData(content);
+                  } else if (marker === "MTF_ORDER_FLOW") {
+                    setMtfOrderFlowData(content);
                   } else if (marker === "WHALE_ALERTS") {
                     // Whale alerts stream early
                   } else if (marker === "ERROR") {
@@ -426,6 +433,9 @@ export default function WarRoomDashboard() {
           <button onClick={() => { setActiveTab("ict"); }} className={`p-3 rounded-xl transition-all ${activeTab === "ict" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <Bird className="h-6 w-6" />
           </button>
+          <button onClick={() => { setActiveTab("orderflow"); }} className={`p-3 rounded-xl transition-all ${activeTab === "orderflow" ? "bg-violet-500/10 text-violet-400" : "text-[#4A4A6A] hover:text-white"}`}>
+            <BarChart3 className="h-6 w-6" />
+          </button>
           <button onClick={() => { setActiveTab("backtest"); }} className={`p-3 rounded-xl transition-all ${activeTab === "backtest" ? "bg-orange-500/10 text-orange-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <LineChart className="h-6 w-6" />
           </button>
@@ -452,6 +462,7 @@ export default function WarRoomDashboard() {
                    activeTab === "backtest" ? "BACKTEST STUDIO" :
                    activeTab === "ict" ? "SMART MONEY CONCEPTS" :
                    activeTab === "consensus" ? "CONSENSUS ENGINE" :
+                   activeTab === "orderflow" ? "ORDER FLOW ANALYSIS" :
                    "OUTCOMES & PERFORMANCE"}
                    {backendStatus === "error" && (
                     <span className="text-xs text-red-500 font-normal uppercase tracking-normal hidden sm:inline">(Offline)</span>
@@ -470,6 +481,7 @@ export default function WarRoomDashboard() {
                  {activeTab === "chart" ? "Real-Time Multi-Agent Analysis" :
                   activeTab === "backtest" ? "Historical Strategy Optimization & Win-Rates" :
                   activeTab === "ict" ? "Real-Time Liquidity, FVG & Order Block Detection" :
+                  activeTab === "orderflow" ? "Delta, CVD, Volume Profile & Divergence Detection" :
                   "Institutional Grade Market Tracking"}
               </span>
             </div>
@@ -608,6 +620,16 @@ export default function WarRoomDashboard() {
               ðŸ¦ ICT
             </button>
             <button
+              onClick={() => { setActiveTab("orderflow"); }}
+              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
+                activeTab === "orderflow"
+                  ? "text-violet-400 border-b-2 border-violet-500 bg-violet-500/5"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              ORDER FLOW
+            </button>
+            <button
               onClick={() => { setActiveTab("backtest"); }}
               className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
                 activeTab === "backtest"
@@ -690,6 +712,12 @@ export default function WarRoomDashboard() {
           {activeTab === "ict" && (
             <div className="p-4">
               <ICTPanel data={ictData} isRunning={isIctRunning} ticker={ticker} />
+            </div>
+          )}
+
+          {activeTab === "orderflow" && (
+            <div className="p-4">
+              <OrderFlowPanel data={orderFlowData} ticker={ticker} mtfData={mtfOrderFlowData} />
             </div>
           )}
 
@@ -870,14 +898,49 @@ export default function WarRoomDashboard() {
               <CardHeader className="border-b border-white/10 ml-2">
                 <div className="flex justify-between items-center">
                   <div>
-                    <CardTitle className="text-xl text-white">SIGNAL ENGINE VERDICT</CardTitle>
-                    {signal.market_regime && (
-                      <span className="text-xs text-slate-500 mt-1">Regime: {signal.market_regime}</span>
-                    )}
+                    <CardTitle className="text-xl text-white flex items-center gap-3">
+                      SIGNAL ENGINE VERDICT
+                      {signal.signal_grade && (
+                        <span className={`px-3 py-1 rounded text-sm font-black ${
+                          signal.signal_grade === "A+" ? "bg-green-500/20 text-green-400 border border-green-500/40 shadow-[0_0_10px_rgba(34,197,94,0.3)]" :
+                          signal.signal_grade === "A" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" :
+                          signal.signal_grade === "B" ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40" :
+                          signal.signal_grade === "C" ? "bg-orange-500/20 text-orange-400 border border-orange-500/40" :
+                          "bg-red-500/20 text-red-400 border border-red-500/40"
+                        }`}>
+                          {signal.signal_grade}
+                        </span>
+                      )}
+                    </CardTitle>
+                    <div className="flex items-center gap-3 mt-1">
+                      {signal.market_regime && (
+                        <span className="text-xs text-slate-500">Regime: {signal.market_regime}</span>
+                      )}
+                      {signal.factors_aligned !== undefined && (
+                        <span className="text-xs text-slate-500">{signal.factors_aligned}/5 factors aligned</span>
+                      )}
+                      {signal.order_flow_bias && signal.order_flow_bias !== "NEUTRAL" && (
+                        <Badge variant="outline" className={`text-[10px] ${
+                          signal.order_flow_bias === "BULLISH" ? "text-green-400 border-green-500/30 bg-green-500/10" :
+                          "text-red-400 border-red-500/30 bg-red-500/10"
+                        }`}>
+                          OF: {signal.order_flow_bias}
+                        </Badge>
+                      )}
+                      {signal.mtf_confluence_label && signal.mtf_confluence_label !== "NEUTRAL" && (
+                        <Badge variant="outline" className={`text-[10px] ${
+                          signal.mtf_confluence_label === "STRONG" ? "text-cyan-400 border-cyan-500/30 bg-cyan-500/10" :
+                          signal.mtf_confluence_label === "MODERATE" ? "text-blue-400 border-blue-500/30 bg-blue-500/10" :
+                          "text-orange-400 border-orange-500/30 bg-orange-500/10"
+                        }`}>
+                          MTF: {signal.mtf_confluence_label} ({signal.mtf_confluence_multiplier}x)
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <div className={`px-6 py-2 rounded font-black text-2xl tracking-widest ${
-                    signal.signal === "LONG" ? "bg-green-500 text-black shadow-[0_0_20px_rgba(34,197,94,0.4)]" : 
-                    signal.signal === "SHORT" ? "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]" : 
+                    signal.signal === "LONG" ? "bg-green-500 text-black shadow-[0_0_20px_rgba(34,197,94,0.4)]" :
+                    signal.signal === "SHORT" ? "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]" :
                     "bg-yellow-500 text-black"
                   }`}>
                     {signal.signal}
@@ -946,6 +1009,32 @@ export default function WarRoomDashboard() {
                   </div>
                 </div>
                 
+                {/* Confluence Factors */}
+                {signal.confluences && signal.confluences.length > 0 && (
+                  <div className="col-span-full mt-4 pt-4 border-t border-white/10">
+                    <h3 className="text-xs text-slate-500 font-bold tracking-widest uppercase mb-3">5-FACTOR CONFLUENCE</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {signal.confluences.map((c, i) => (
+                        <div key={i} className={`p-2 rounded border text-center ${
+                          c.direction === "BULLISH" ? "bg-green-500/5 border-green-500/20" :
+                          c.direction === "BEARISH" ? "bg-red-500/5 border-red-500/20" :
+                          "bg-slate-500/5 border-slate-500/20"
+                        }`}>
+                          <div className="text-[10px] text-slate-500 font-bold">{c.name}</div>
+                          <div className={`text-sm font-black ${
+                            c.direction === "BULLISH" ? "text-green-400" :
+                            c.direction === "BEARISH" ? "text-red-400" :
+                            "text-slate-400"
+                          }`}>
+                            {c.score > 0 ? "+" : ""}{c.score}
+                          </div>
+                          <div className="text-[9px] text-slate-600">{c.weight}% weight</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Reasons */}
                 <div className="col-span-full mt-4 pt-4 border-t border-white/10 text-sm">
                   <h3 className="text-xs text-slate-500 font-bold tracking-widest uppercase mb-2">Rationale</h3>

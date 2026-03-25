@@ -1,9 +1,8 @@
 import os
 import json
 import asyncio
-import sqlite3
-from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
+from datetime import datetime
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -13,8 +12,20 @@ from concurrent.futures import ThreadPoolExecutor
 import openai
 import yfinance as yf
 import pandas as pd
-import numpy as np
 from whale_intel import TradFiWhaleDetector
+
+# ─── Extracted Modules ──────────────────────────────────────
+from indicators import _ema, _rsi, _macd, _atr, _adx, _vwap, _bollinger, _stoch_rsi, compute_indicators
+from ict_analysis import detect_ict_concepts, format_ict_for_ai
+from data_fetcher import (
+    TICKER_MAP, CONTEXT_TICKERS, resolve_ticker, format_indicators_for_ai,
+    TIMEFRAME_CONFIG, fetch_multi_timeframe_data, build_mtf_summary,
+    fetch_market_context, get_economic_calendar,
+)
+from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal_history, report_outcome, get_outcomes, monitor_active_trades
+from backtest import calculate_strategy_score, calculate_kelly, run_backtest
+from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
+from signal_scoring import calculate_enhanced_score
 
 load_dotenv()
 
@@ -41,564 +52,48 @@ except Exception as e:
     print(f"Warning: OpenAI client init failed: {e}")
     client = None
 
-# ─── Ticker Mapping ────────────────────────────────────────
-TICKER_MAP = {
-    "NQ1": "NQ=F", "NQ": "NQ=F", "NASDAQ": "NQ=F",
-    "ES1": "ES=F", "ES": "ES=F", "SPX": "ES=F",
-    "YM1": "YM=F", "YM": "YM=F", "DOW": "YM=F",
-    "RTY1": "RTY=F", "RTY": "RTY=F",
-    "CL1": "CL=F", "CL": "CL=F", "OIL": "CL=F",
-    "GC1": "GC=F", "GC": "GC=F", "GOLD": "GC=F", "XAUUSD": "GC=F",
-    "SI1": "SI=F", "SI": "SI=F", "SILVER": "SI=F",
-    "ZB1": "ZB=F", "ZB": "ZB=F",
-    "BTCUSD": "BTC-USD", "BTC": "BTC-USD",
-    "ETHUSD": "ETH-USD", "ETH": "ETH-USD",
-    "DXY": "DX-Y.NYB",
-}
 
-CONTEXT_TICKERS = {
-    "VIX": "^VIX",
-    "DXY": "DX-Y.NYB",
-    "US10Y": "^TNX",
-    "SP500": "ES=F",
-}
+# ═══════════════════════════════════════════════════════════
+#  PYDANTIC MODELS
+# ═══════════════════════════════════════════════════════════
 
 class AnalysisRequest(BaseModel):
     ticker: str
     timeframe: str
     riskProfile: str
 
-
-def resolve_ticker(raw: str) -> str:
-    return TICKER_MAP.get(raw.upper().strip(), raw.upper().strip())
-
-
-# ═══════════════════════════════════════════════════════════
-#  PURE PANDAS/NUMPY INDICATOR COMPUTATIONS (no pandas-ta)
-# ═══════════════════════════════════════════════════════════
-
-def _ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
-
-def _rsi(close: pd.Series, period: int = 14) -> float:
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
-    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    val = rsi.iloc[-1]
-    return round(float(val), 2) if not pd.isna(val) else None
-
-def _macd(close: pd.Series, fast=12, slow=26, signal=9) -> dict:
-    ema_fast = _ema(close, fast)
-    ema_slow = _ema(close, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = _ema(macd_line, signal)
-    histogram = macd_line - signal_line
-    return {
-        "MACD_line": round(float(macd_line.iloc[-1]), 2) if not pd.isna(macd_line.iloc[-1]) else None,
-        "MACD_signal": round(float(signal_line.iloc[-1]), 2) if not pd.isna(signal_line.iloc[-1]) else None,
-        "MACD_histogram": round(float(histogram.iloc[-1]), 2) if not pd.isna(histogram.iloc[-1]) else None,
-    }
-
-def _bollinger(close: pd.Series, period=20, std_dev=2) -> dict:
-    sma = close.rolling(period).mean()
-    std = close.rolling(period).std()
-    upper = sma + std_dev * std
-    lower = sma - std_dev * std
-    return {
-        "BB_upper": round(float(upper.iloc[-1]), 2) if not pd.isna(upper.iloc[-1]) else None,
-        "BB_mid": round(float(sma.iloc[-1]), 2) if not pd.isna(sma.iloc[-1]) else None,
-        "BB_lower": round(float(lower.iloc[-1]), 2) if not pd.isna(lower.iloc[-1]) else None,
-    }
-
-def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period=14) -> float:
-    tr1 = high - low
-    tr2 = (high - close.shift()).abs()
-    tr3 = (low - close.shift()).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.ewm(span=period, adjust=False).mean()
-    val = atr.iloc[-1]
-    return round(float(val), 2) if not pd.isna(val) else None
-
-def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period=14) -> float:
-    plus_dm = high.diff()
-    minus_dm = -low.diff()
-    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
-    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
-    tr1 = high - low
-    tr2 = (high - close.shift()).abs()
-    tr3 = (low - close.shift()).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.ewm(span=period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / atr)
-    minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / atr)
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
-    adx = dx.ewm(span=period, adjust=False).mean()
-    val = adx.iloc[-1]
-    return round(float(val), 2) if not pd.isna(val) else None
-
-def _stoch_rsi(close: pd.Series, period=14, smooth_k=3, smooth_d=3) -> dict:
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
-    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    rsi_min = rsi.rolling(period).min()
-    rsi_max = rsi.rolling(period).max()
-    stoch_rsi = (rsi - rsi_min) / (rsi_max - rsi_min)
-    k = stoch_rsi.rolling(smooth_k).mean() * 100
-    d = k.rolling(smooth_d).mean()
-    return {
-        "StochRSI_K": round(float(k.iloc[-1]), 2) if not pd.isna(k.iloc[-1]) else None,
-        "StochRSI_D": round(float(d.iloc[-1]), 2) if not pd.isna(d.iloc[-1]) else None,
-    }
-
-def _vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> float:
-    tp = (high + low + close) / 3
-    cumvol = volume.cumsum()
-    cumtp = (tp * volume).cumsum()
-    vwap = cumtp / cumvol
-    val = vwap.iloc[-1]
-    return round(float(val), 2) if not pd.isna(val) else None
-
-
-def compute_indicators(df: pd.DataFrame) -> dict:
-    """Compute all technical indicators from OHLCV using pure pandas/numpy."""
-    if df.empty or len(df) < 20:
-        return {"error": "Insufficient data for indicator computation"}
-
-    indicators = {}
-    try:
-        close = df["Close"]
-        high = df["High"]
-        low = df["Low"]
-        volume = df["Volume"]
-
-        current_price = round(float(close.iloc[-1]), 2)
-        indicators["current_price"] = current_price
-
-        # RSI
-        indicators["RSI_14"] = _rsi(close, 14)
-
-        # MACD
-        macd = _macd(close)
-        indicators.update(macd)
-
-        # Bollinger Bands
-        bb = _bollinger(close)
-        indicators.update(bb)
-
-        # ATR
-        indicators["ATR_14"] = _atr(high, low, close, 14)
-
-        # ADX
-        indicators["ADX"] = _adx(high, low, close, 14)
-
-        # EMAs
-        for period in [9, 21, 50, 200]:
-            ema = _ema(close, period)
-            if len(ema) > 0 and not pd.isna(ema.iloc[-1]):
-                indicators[f"EMA_{period}"] = round(float(ema.iloc[-1]), 2)
-
-        # VWAP
-        try:
-            indicators["VWAP"] = _vwap(high, low, close, volume)
-        except Exception:
-            pass
-
-        # Stochastic RSI
-        stoch = _stoch_rsi(close)
-        indicators.update(stoch)
-
-        # Volume analysis
-        avg_vol = volume.rolling(20).mean()
-        if len(avg_vol) > 0 and not pd.isna(avg_vol.iloc[-1]):
-            cv = float(volume.iloc[-1])
-            av = float(avg_vol.iloc[-1])
-            indicators["current_volume"] = int(cv)
-            indicators["avg_volume_20"] = int(av)
-            indicators["volume_ratio"] = round(cv / av, 2) if av > 0 else 0
-
-        # Derived conditions
-        if "EMA_9" in indicators and "EMA_21" in indicators:
-            indicators["EMA_9_21_cross"] = "BULLISH" if indicators["EMA_9"] > indicators["EMA_21"] else "BEARISH"
-
-        if "VWAP" in indicators and indicators["VWAP"]:
-            indicators["price_vs_VWAP"] = "ABOVE" if current_price > indicators["VWAP"] else "BELOW"
-
-        if indicators.get("RSI_14"):
-            rsi_val = indicators["RSI_14"]
-            if rsi_val > 70:
-                indicators["RSI_condition"] = "OVERBOUGHT"
-            elif rsi_val < 30:
-                indicators["RSI_condition"] = "OVERSOLD"
-            else:
-                indicators["RSI_condition"] = "NEUTRAL"
-
-    except Exception as e:
-        indicators["computation_error"] = str(e)
-
-    return indicators
-
-
-# ═══════════════════════════════════════════════════════════
-#  ICT / SMART MONEY CONCEPTS (CHoCH, BOS, Order Blocks, FVG)
-# ═══════════════════════════════════════════════════════════
-
-def _detect_swing_points(high: pd.Series, low: pd.Series, lookback: int = 5) -> dict:
-    """Detect swing highs and swing lows for structural analysis."""
-    swing_highs = []
-    swing_lows = []
-
-    for i in range(lookback, len(high) - lookback):
-        # Swing High: highest point within lookback window
-        if high.iloc[i] == high.iloc[i - lookback:i + lookback + 1].max():
-            swing_highs.append({"index": i, "price": round(float(high.iloc[i]), 2)})
-        # Swing Low: lowest point within lookback window
-        if low.iloc[i] == low.iloc[i - lookback:i + lookback + 1].min():
-            swing_lows.append({"index": i, "price": round(float(low.iloc[i]), 2)})
-
-    return {"swing_highs": swing_highs[-8:], "swing_lows": swing_lows[-8:]}
-
-
-def _detect_structure(high: pd.Series, low: pd.Series, lookback: int = 5) -> list:
-    """Detect Break of Structure (BOS) and Change of Character (CHoCH)."""
-    swings = _detect_swing_points(high, low, lookback)
-    events = []
-
-    # Track structure: Higher Highs/Higher Lows = uptrend, Lower Highs/Lower Lows = downtrend
-    shs = swings["swing_highs"]
-    sls = swings["swing_lows"]
-
-    # Detect BOS / CHoCH from recent swing points
-    if len(shs) >= 2 and len(sls) >= 2:
-        last_sh = shs[-1]["price"]
-        prev_sh = shs[-2]["price"]
-        last_sl = sls[-1]["price"]
-        prev_sl = sls[-2]["price"]
-
-        # BOS: continuation of structure
-        if last_sh > prev_sh and last_sl > prev_sl:
-            events.append({"type": "BOS", "direction": "BULLISH", "level": last_sh, "detail": f"Higher High at {last_sh}, Higher Low at {last_sl}"})
-        elif last_sh < prev_sh and last_sl < prev_sl:
-            events.append({"type": "BOS", "direction": "BEARISH", "level": last_sl, "detail": f"Lower Low at {last_sl}, Lower High at {last_sh}"})
-
-        # CHoCH: reversal of structure
-        if last_sh > prev_sh and last_sl < prev_sl:
-            events.append({"type": "CHoCH", "direction": "BULLISH", "level": last_sh, "detail": f"Broke previous high {prev_sh} → reversal up"})
-        elif last_sh < prev_sh and last_sl > prev_sl:
-            events.append({"type": "CHoCH", "direction": "BEARISH", "level": last_sl, "detail": f"Broke previous low {prev_sl} → reversal down"})
-
-    return events
-
-
-def _detect_order_blocks(df: pd.DataFrame, lookback: int = 20) -> list:
-    """Detect bullish and bearish order blocks (last candle before a strong move)."""
-    obs = []
-    close = df["Close"]
-    openp = df["Open"]
-    high = df["High"]
-    low = df["Low"]
-
-    for i in range(max(1, len(df) - lookback), len(df) - 1):
-        body = abs(float(close.iloc[i + 1]) - float(openp.iloc[i + 1]))
-        avg_body = abs(close - openp).rolling(10).mean()
-        if len(avg_body) > i and not pd.isna(avg_body.iloc[i]):
-            threshold = float(avg_body.iloc[i]) * 2
-
-            # Bullish OB: bearish candle followed by strong bullish candle
-            if float(close.iloc[i]) < float(openp.iloc[i]) and body > threshold and float(close.iloc[i + 1]) > float(openp.iloc[i + 1]):
-                obs.append({
-                    "type": "BULLISH_OB",
-                    "top": round(float(openp.iloc[i]), 2),
-                    "bottom": round(float(close.iloc[i]), 2),
-                    "index": i,
-                })
-
-            # Bearish OB: bullish candle followed by strong bearish candle
-            if float(close.iloc[i]) > float(openp.iloc[i]) and body > threshold and float(close.iloc[i + 1]) < float(openp.iloc[i + 1]):
-                obs.append({
-                    "type": "BEARISH_OB",
-                    "top": round(float(close.iloc[i]), 2),
-                    "bottom": round(float(openp.iloc[i]), 2),
-                    "index": i,
-                })
-
-    return obs[-4:]  # Return last 4 order blocks
-
-
-def _detect_fvg(df: pd.DataFrame, lookback: int = 20) -> list:
-    """Detect Fair Value Gaps (3-candle imbalances)."""
-    fvgs = []
-    high = df["High"]
-    low = df["Low"]
-
-    for i in range(max(2, len(df) - lookback), len(df)):
-        h1 = float(high.iloc[i - 2])
-        l3 = float(low.iloc[i])
-        h3 = float(high.iloc[i])
-        l1 = float(low.iloc[i - 2])
-
-        # Bullish FVG: gap between candle 1 high and candle 3 low
-        if l3 > h1:
-            fvgs.append({
-                "type": "BULLISH_FVG",
-                "top": round(l3, 2),
-                "bottom": round(h1, 2),
-                "size": round(l3 - h1, 2),
-            })
-
-        # Bearish FVG: gap between candle 3 high and candle 1 low
-        if h3 < l1:
-            fvgs.append({
-                "type": "BEARISH_FVG",
-                "top": round(l1, 2),
-                "bottom": round(h3, 2),
-                "size": round(l1 - h3, 2),
-            })
-
-    return fvgs[-4:]  # Return last 4 FVGs
-
-
-def detect_ict_concepts(df: pd.DataFrame) -> dict:
-    """Run all ICT/SMC detection algorithms on OHLCV data."""
-    if df.empty or len(df) < 20:
-        return {"error": "Insufficient data for ICT analysis"}
-
-    try:
-        high = df["High"]
-        low = df["Low"]
-
-        swings = _detect_swing_points(high, low)
-        structure = _detect_structure(high, low)
-        order_blocks = _detect_order_blocks(df)
-        fvgs = _detect_fvg(df)
-
-        # Determine current market structure
-        if structure:
-            last_event = structure[-1]
-            market_structure = f"{last_event['direction']} {last_event['type']}"
-        else:
-            market_structure = "RANGING"
-
-        return {
-            "market_structure": market_structure,
-            "structure_events": structure,
-            "order_blocks": order_blocks,
-            "fair_value_gaps": fvgs,
-            "recent_swing_highs": swings["swing_highs"][-3:],
-            "recent_swing_lows": swings["swing_lows"][-3:],
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def format_ict_for_ai(ict_data: dict) -> str:
-    """Format ICT concepts into AI-readable text."""
-    if "error" in ict_data:
-        return f"ICT Analysis: {ict_data['error']}"
-
-    lines = ["═══ ICT / SMART MONEY CONCEPTS ═══"]
-    lines.append(f"  Market Structure: {ict_data.get('market_structure', 'Unknown')}")
-
-    for evt in ict_data.get("structure_events", []):
-        lines.append(f"  {evt['type']}: {evt['direction']} — {evt['detail']}")
-
-    for ob in ict_data.get("order_blocks", []):
-        lines.append(f"  {ob['type']}: Zone {ob['bottom']}-{ob['top']}")
-
-    for fvg in ict_data.get("fair_value_gaps", []):
-        lines.append(f"  {fvg['type']}: Gap {fvg['bottom']}-{fvg['top']} (size: {fvg['size']})")
-
-    shs = ict_data.get("recent_swing_highs", [])
-    sls = ict_data.get("recent_swing_lows", [])
-    if shs:
-        lines.append(f"  Key Resistance (Swing Highs): {', '.join(str(s['price']) for s in shs)}")
-    if sls:
-        lines.append(f"  Key Support (Swing Lows): {', '.join(str(s['price']) for s in sls)}")
-
-    return "\n".join(lines)
-
-
-
-
-def format_indicators_for_ai(indicators: dict, label: str) -> str:
-    if "error" in indicators:
-        return f"[{label}] {indicators['error']}"
-
-    lines = [f"═══ {label} INDICATORS ═══"]
-    lines.append(f"  Price: {indicators.get('current_price', 'N/A')}")
-
-    ema_cross = indicators.get("EMA_9_21_cross", "N/A")
-    adx = indicators.get("ADX", "N/A")
-    lines.append(f"  Trend: EMA 9/21={ema_cross}, ADX={adx}")
-
-    emas = [f"EMA{p}={indicators[f'EMA_{p}']}" for p in [9, 21, 50, 200] if f"EMA_{p}" in indicators]
-    if emas:
-        lines.append(f"  EMAs: {', '.join(emas)}")
-
-    rsi = indicators.get("RSI_14", "N/A")
-    rsi_cond = indicators.get("RSI_condition", "")
-    lines.append(f"  RSI(14): {rsi} ({rsi_cond})")
-
-    lines.append(f"  MACD: line={indicators.get('MACD_line', 'N/A')}, signal={indicators.get('MACD_signal', 'N/A')}, hist={indicators.get('MACD_histogram', 'N/A')}")
-    lines.append(f"  StochRSI: K={indicators.get('StochRSI_K', 'N/A')}, D={indicators.get('StochRSI_D', 'N/A')}")
-    lines.append(f"  ATR(14): {indicators.get('ATR_14', 'N/A')}")
-    lines.append(f"  Bollinger: upper={indicators.get('BB_upper', 'N/A')}, mid={indicators.get('BB_mid', 'N/A')}, lower={indicators.get('BB_lower', 'N/A')}")
-    lines.append(f"  VWAP: {indicators.get('VWAP', 'N/A')} (price {indicators.get('price_vs_VWAP', 'N/A')})")
-    lines.append(f"  Volume ratio: {indicators.get('volume_ratio', 'N/A')}x avg")
-
-    return "\n".join(lines)
-
-
-# ═══════════════════════════════════════════════════════════
-#  MULTI-TIMEFRAME ANALYSIS
-# ═══════════════════════════════════════════════════════════
-
-TIMEFRAME_CONFIG = {
-    "1m": [("1m", "1d", "1-Min"), ("5m", "5d", "5-Min"), ("15m", "5d", "15-Min"), ("1h", "30d", "1-Hour")],
-    "2m": [("2m", "5d", "2-Min"), ("5m", "5d", "5-Min"), ("15m", "5d", "15-Min"), ("1h", "30d", "1-Hour")],
-    "5m": [("5m", "5d", "5-Min"), ("15m", "5d", "15-Min"), ("1h", "30d", "1-Hour"), ("1d", "60d", "Daily")],
-    "15m": [("5m", "5d", "5-Min"), ("15m", "5d", "15-Min"), ("1h", "30d", "1-Hour"), ("1d", "60d", "Daily")],
-    "1h": [("15m", "5d", "15-Min"), ("1h", "30d", "1-Hour"), ("1d", "60d", "Daily")],
-    "4h": [("1h", "30d", "1-Hour"), ("1d", "90d", "Daily")],
-}
-
-
-def fetch_multi_timeframe_data(ticker: str, primary_tf: str) -> dict:
-    yf_symbol = resolve_ticker(ticker)
-    configs = TIMEFRAME_CONFIG.get(primary_tf, TIMEFRAME_CONFIG["5m"])
-
-    results = {}
-    dataframes = {}
-    bars_data = None
-
-    for interval, period, label in configs:
-        try:
-            tk = yf.Ticker(yf_symbol)
-            df = tk.history(period=period, interval=interval)
-            if df.empty:
-                results[label] = {"error": f"No data for {interval}"}
-                continue
-
-            results[label] = compute_indicators(df)
-            dataframes[interval] = df  # Store raw DF for ICT
-
-            if interval == primary_tf or bars_data is None:
-                recent = df.tail(10)
-                bars_data = [{
-                    "time": str(idx),
-                    "O": round(float(row["Open"]), 2),
-                    "H": round(float(row["High"]), 2),
-                    "L": round(float(row["Low"]), 2),
-                    "C": round(float(row["Close"]), 2),
-                    "V": int(row["Volume"])
-                } for idx, row in recent.iterrows()]
-
-        except Exception as e:
-            results[label] = {"error": str(e)}
-
-    return {"indicators": results, "bars": bars_data or [], "symbol": yf_symbol, "dataframes": dataframes}
-
-
-def build_mtf_summary(mtf_data: dict, ticker: str) -> str:
-    lines = [f"╔══════════════════════════════════════╗"]
-    lines.append(f"║  MULTI-TIMEFRAME ANALYSIS: {ticker}")
-    lines.append(f"╚══════════════════════════════════════╝\n")
-
-    for label, indicators in mtf_data["indicators"].items():
-        lines.append(format_indicators_for_ai(indicators, label))
-        lines.append("")
-
-    # MTF Confluence
-    trends = []
-    for label, ind in mtf_data["indicators"].items():
-        if isinstance(ind, dict) and "EMA_9_21_cross" in ind:
-            trends.append(f"{label}: {ind['EMA_9_21_cross']}")
-
-    if trends:
-        lines.append("═══ MTF TREND CONFLUENCE ═══")
-        for t in trends:
-            lines.append(f"  {t}")
-        bullish = sum(1 for t in trends if "BULLISH" in t)
-        bearish = sum(1 for t in trends if "BEARISH" in t)
-        lines.append(f"  Alignment: {bullish} BULLISH / {bearish} BEARISH out of {len(trends)} timeframes")
-
-    return "\n".join(lines)
-
-
-# ═══════════════════════════════════════════════════════════
-#  MARKET CONTEXT LAYER
-# ═══════════════════════════════════════════════════════════
-
-def fetch_market_context() -> str:
-    lines = ["═══ MARKET CONTEXT ═══"]
-
-    for name, symbol in CONTEXT_TICKERS.items():
-        try:
-            tk = yf.Ticker(symbol)
-            df = tk.history(period="2d", interval="5m")
-            if df.empty:
-                lines.append(f"  {name}: No data")
-                continue
-
-            current = round(float(df["Close"].iloc[-1]), 2)
-            day_df = tk.history(period="5d", interval="1d")
-            if not day_df.empty and len(day_df) >= 2:
-                prev_close = float(day_df["Close"].iloc[-2])
-                pct = round(((current - prev_close) / prev_close) * 100, 2)
-            else:
-                pct = 0.0
-
-            direction = "▲" if pct > 0 else "▼" if pct < 0 else "─"
-            lines.append(f"  {name}: {current} ({direction} {pct:+.2f}%)")
-
-        except Exception as e:
-            lines.append(f"  {name}: Error ({str(e)[:50]})")
-
-    lines.append("\n  Interpretation:")
-    lines.append("  - VIX > 25 = High fear, reduce size")
-    lines.append("  - DXY rising = Pressure on equities/gold")
-    lines.append("  - US10Y rising = Rate-sensitive sectors under pressure")
-
-    return "\n".join(lines)
-
-
-# ═══════════════════════════════════════════════════════════
-#  ECONOMIC CALENDAR
-# ═══════════════════════════════════════════════════════════
-
-def get_economic_calendar() -> str:
-    now = datetime.utcnow()
-    day = now.strftime("%A")
-    hour = now.hour
-    warnings = []
-
-    if day == "Wednesday" and 18 <= hour <= 20:
-        warnings.append("⚠️ FOMC typically releases Wed 2PM ET. HIGH VOLATILITY EXPECTED.")
-    if day == "Friday" and 12 <= hour <= 14:
-        warnings.append("⚠️ NFP releases first Friday at 8:30 AM ET. Check if today is NFP day.")
-    if day in ["Tuesday", "Wednesday", "Thursday"] and 12 <= hour <= 14:
-        warnings.append("ℹ️ CPI/PPI often releases Tue-Thu 8:30 AM ET. Check calendar.")
-
-    if day in ["Saturday", "Sunday"]:
-        warnings.append("📅 Weekend: Limited futures liquidity.")
-    elif hour < 13 or hour > 21:
-        warnings.append("🕐 Outside US regular hours. Lower liquidity.")
-    elif 13 <= hour <= 14:
-        warnings.append("🔔 US market open. Expect high volatility first 30 min.")
-    elif 19 <= hour <= 20:
-        warnings.append("🔔 Power hour. Institutional volume increasing.")
-
-    warnings.append(f"📆 UTC: {now.strftime('%Y-%m-%d %H:%M')} ({day})")
-    warnings.append("💡 Check forexfactory.com before trading.")
-
-    return "═══ ECONOMIC CALENDAR ═══\n" + "\n".join(f"  {w}" for w in warnings)
+class ChartDataRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+class ChartRequest(BaseModel):
+    ticker: str
+    timeframe: str
+
+class WatchlistRequest(BaseModel):
+    tickers: list[str] = ["NQ1", "ES1", "YM1", "RTY1", "GC1", "CL1", "SI1", "ZB1"]
+    timeframe: str = "5m"
+
+class ConsensusRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+class ICTRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+class BacktestRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+    lookback_days: int = 5
+
+class OutcomeReport(BaseModel):
+    ticker: str
+    signal: str
+    entry: float
+    result: str  # WIN or LOSS
+    pnl_pct: float
+    notes: str = ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -628,49 +123,76 @@ async def ask_ai(role: str, prompt: str, max_tokens: int = 300, learning_context
 
 
 # ═══════════════════════════════════════════════════════════
-#  MAIN ANALYSIS STREAM
+#  TELEGRAM BOT ALERTS
 # ═══════════════════════════════════════════════════════════
 
-class ChartDataRequest(BaseModel):
-    ticker: str
-    timeframe: str = "5m"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-@app.post("/api/v1/chart-data")
-async def get_chart_data(req: ChartDataRequest):
+async def send_telegram_alert(signal_data: dict):
+    """Send a formatted signal alert to Telegram."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
     try:
-        ticker = req.ticker.upper()
-        tf = req.timeframe
-        
-        loop = asyncio.get_event_loop()
-        mtf_data = await loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf)
-        
-        if "dataframes" not in mtf_data or tf not in mtf_data["dataframes"]:
-            return {"candles": []}
-            
-        df = mtf_data["dataframes"][tf]
-        
-        candles = []
-        for idx, row in df.iterrows():
-            candles.append({
-                "time": int(idx.timestamp()),
-                "open": float(row["Open"]),
-                "high": float(row["High"]),
-                "low": float(row["Low"]),
-                "close": float(row["Close"])
-            })
-            
-        return {"candles": candles}
+        sig = signal_data.get("signal", "UNKNOWN")
+        ticker = signal_data.get("ticker", "???")
+        tf = signal_data.get("timeframe", "?")
+        confidence = signal_data.get("confidence", 0)
+        entry = signal_data.get("entry_zone", {})
+        sl = signal_data.get("stop_loss", 0)
+        tps = signal_data.get("take_profit", [])
+        rr = signal_data.get("risk_reward", 0)
+        reasons = signal_data.get("reasons", [])
+        regime = signal_data.get("market_regime", "unknown")
+
+        emoji = "🟢" if sig == "LONG" else "🔴" if sig == "SHORT" else "⚪"
+
+        tp_lines = ""
+        for tp in tps:
+            tp_lines += f"  TP{tp.get('level', '?')}: {tp.get('price', 0)}\n"
+
+        reason_lines = "\n".join(f"  • {r}" for r in reasons[:3])
+
+        message = (
+            f"{emoji} *WAR ROOM SIGNAL*\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"*{sig}* `{ticker}` on `{tf}`\n"
+            f"Regime: `{regime}`\n\n"
+            f"📍 *Entry:* `{entry.get('min', 0)} - {entry.get('max', 0)}`\n"
+            f"🛑 *Stop:* `{sl}`\n"
+            f"🎯 *Targets:*\n{tp_lines}\n"
+            f"📊 R:R `{rr}` | Conf `{confidence}%`\n\n"
+            f"💡 *Rationale:*\n{reason_lines}\n\n"
+            f"🕐 {datetime.utcnow().strftime('%H:%M UTC')}"
+        )
+
+        import httpx
+        async with httpx.AsyncClient() as hclient:
+            await hclient.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True,
+                },
+                timeout=5,
+            )
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e), "candles": []}
+        print(f"Telegram alert failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════
+#  MAIN ANALYSIS STREAM
+# ═══════════════════════════════════════════════════════════
 
 async def generate_analysis_stream(req: AnalysisRequest):
     ticker = req.ticker.upper()
     tf = req.timeframe
     risk = req.riskProfile
 
-    def emit(marker: str, data: dict):
+    def emit(marker: str, data):
         return f"data: [{marker}] {json.dumps(data)}\n\n"
 
     try:
@@ -688,26 +210,54 @@ async def generate_analysis_stream(req: AnalysisRequest):
         primary = list(mtf_data["indicators"].values())[0] if mtf_data["indicators"] else {}
         current_price = primary.get("current_price", "UNKNOWN")
 
-        # ICT / Smart Money Concepts from primary timeframe
+        # Order Flow + ICT from primary timeframe
         primary_df = mtf_data.get("dataframes", {}).get(tf) if "dataframes" in mtf_data else None
         ict_data = {}
         ict_text = ""
+        order_flow_data = {}
+        order_flow_text = ""
         if primary_df is not None and not primary_df.empty:
-            ict_data = detect_ict_concepts(primary_df)
+            # Compute order flow first so delta DF can validate ICT zones
+            order_flow_data = compute_order_flow_summary(primary_df)
+            order_flow_text = format_order_flow_for_ai(order_flow_data)
+            delta_df = compute_delta_series(primary_df)
+            ict_data = detect_ict_concepts(primary_df, order_flow_df=delta_df)
             ict_text = format_ict_for_ai(ict_data)
-        
-        # Stream ICT and Backtest data to the respective frontend panels immediately
+
+        # ── MTF Order Flow Confluence ──
+        mtf_of = {}
+        dataframes = mtf_data.get("dataframes", {})
+        if dataframes:
+            mtf_of = compute_mtf_order_flow(dataframes, tf)
+
+        # Stream ICT, Order Flow, and Backtest data to frontend panels
         yield emit("ICT", {"ticker": ticker, "timeframe": tf, "ict": ict_data})
+        yield emit("ORDER_FLOW", order_flow_data)
+        yield emit("MTF_ORDER_FLOW", mtf_of)
         yield emit("BACKTEST", backtest_data)
 
-        # ── Calculate Deterministic Strategy Score (Anchor) ──
-        strat_score, strat_dir, strat_reasons = calculate_strategy_score(
-            primary.get("EMA_9", 0), primary.get("EMA_21", 0), primary.get("RSI_14"),
-            primary.get("MACD_histogram"), primary.get("ADX"), primary.get("volume_ratio"),
-            current_price, primary.get("VWAP")
-        )
+        # ── Calculate Enhanced Strategy Score (5-Factor Confluence) ──
+        enhanced = calculate_enhanced_score(primary, ict_data, order_flow_data, mtf_confluence=mtf_of)
+        strat_score = enhanced["score"]
+        strat_dir = enhanced["direction"]
+        strat_reasons = enhanced["signals"]
+        signal_grade = enhanced["grade"]
+        market_regime = enhanced["regime"]
+        confluences = enhanced["confluences"]
+        factors_aligned = enhanced["factors_aligned"]
+        order_flow_agrees = enhanced["order_flow_agrees"]
 
-        full_data = f"{mtf_summary}\n\n{ict_text}\n\n{market_context}\n\n{econ_calendar}"
+        # Format MTF order flow confluence for AI
+        mtf_of_text = ""
+        if mtf_of and mtf_of.get("total_count", 0) > 0:
+            mtf_of_text = "═══ MTF ORDER FLOW CONFLUENCE ═══\n"
+            for tf_key, bias in mtf_of.get("tf_biases", {}).items():
+                cvd = mtf_of.get("tf_cvd", {}).get(tf_key, "FLAT")
+                mtf_of_text += f"  {tf_key}: Delta={bias}, CVD={cvd}\n"
+            mtf_of_text += f"  Confluence: {mtf_of['confluence_label']} ({mtf_of['confluence_multiplier']}x multiplier)\n"
+            mtf_of_text += f"  Agreement: {mtf_of['agreement_count']}/{mtf_of['total_count']} timeframes aligned"
+
+        full_data = f"{mtf_summary}\n\n{ict_text}\n\n{order_flow_text}\n\n{mtf_of_text}\n\n{market_context}\n\n{econ_calendar}"
 
         # ── 0a. Format Whale Alerts ──
         whale_text = ""
@@ -716,27 +266,10 @@ async def generate_analysis_stream(req: AnalysisRequest):
             for w in whale_alerts:
                 whale_text += f"  [{w.alert_type.upper()}] {w.details['label']}! Magnitude: {w.magnitude:.1f}x normal volume. Price direction: {w.details['price_change_pct']}. Confidence: {w.confidence:.0f}/100.\n"
             full_data += f"\n\n{whale_text}"
-            # Stream the whale alerts to frontend immediately
             yield emit("WHALE_ALERTS", [w.__dict__ for w in whale_alerts])
+
         # ── 0b. Fetch self-learning context from outcomes DB ──
-        learning_ctx = ""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            rows = conn.execute("SELECT data FROM outcomes ORDER BY id DESC LIMIT 100").fetchall()
-            conn.close()
-            outcome_list = [json.loads(row[0]) for row in rows]
-            total = len(outcome_list)
-            if total >= 5:
-                wins = sum(1 for o in outcome_list if o["result"] == "WIN")
-                losses = total - wins
-                win_rate = round(wins / total * 100, 1)
-                recent = outcome_list[:10]
-                learning_ctx = f"SELF-LEARNING DATA ({wins}W/{losses}L, {win_rate}% win rate from {total} tracked signals):\n"
-                for o in recent:
-                    learning_ctx += f"  {o['ticker']} {o['signal']} -> {o['result']} ({o['pnl_pct']}%)\n"
-                learning_ctx += "Use this data to calibrate your confidence levels and avoid repeating losing patterns."
-        except Exception:
-            pass  # Self-learning is optional, don't break analysis
+        learning_ctx = get_learning_context()
 
         price_anchor = (
             f"\nCRITICAL: CURRENT LIVE PRICE of {ticker} is {current_price}. "
@@ -748,7 +281,7 @@ async def generate_analysis_stream(req: AnalysisRequest):
             "FUNDAMENTAL_ANALYST": f"Analyze {ticker} fundamentals. Price: {current_price}.\n{mtf_summary}\n{market_context}",
             "SENTIMENT_ANALYST": f"Analyze sentiment for {ticker}. Price: {current_price}. Vol ratio: {primary.get('volume_ratio', 'N/A')}x. RSI: {primary.get('RSI_14', 'N/A')}.\n{market_context}",
             "NEWS_ANALYST": f"Analyze macro factors for {ticker}. Price: {current_price}.\n{market_context}\n{econ_calendar}",
-            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators AND Smart Money Concepts below. Reference exact values, mention structure (BOS/CHoCH), order blocks, and FVGs.\n{mtf_summary}\n{ict_text}{price_anchor}",
+            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators, Smart Money Concepts, AND Order Flow below. Reference exact values, mention structure (BOS/CHoCH), order blocks, FVGs, delta bias, CVD trend, volume profile (POC/VAH/VAL), and any divergences or absorption zones.\n{mtf_summary}\n{ict_text}\n{order_flow_text}{price_anchor}",
         }
 
         analyst_outputs = {}
@@ -803,13 +336,28 @@ CRITICAL PRICE DATA:
 - BB lower: {primary.get('BB_lower', 'N/A')}
 - ADX: {primary.get('ADX', 'N/A')}
 
-CRITICAL DETERMINISTIC STRATEGY FACTOR:
+ORDER FLOW DATA:
+- Delta Bias: {order_flow_data.get('summary', {}).get('overall_delta_bias', 'N/A')}
+- CVD Trend: {order_flow_data.get('summary', {}).get('cvd_trend', 'N/A')}
+- POC: {order_flow_data.get('summary', {}).get('poc', 'N/A')}
+- VAH: {order_flow_data.get('summary', {}).get('vah', 'N/A')}
+- VAL: {order_flow_data.get('summary', {}).get('val', 'N/A')}
+- Divergences: {len(order_flow_data.get('divergences', []))}
+- Absorptions: {len(order_flow_data.get('absorptions', []))}
+- VWAP Deviation: {order_flow_data.get('summary', {}).get('vwap_deviation', 0)}σ
+
+ENHANCED STRATEGY SCORING (5-Factor Confluence):
 - Strategy Direction: {strat_dir}
 - Strategy Score: {strat_score} (-100 to +100)
-- Strategy Drivers: {', '.join(strat_reasons)}
+- Signal Grade: {signal_grade} (A+=highest, F=reject)
+- Market Regime: {market_regime}
+- Factors Aligned: {factors_aligned}/5
+- Order Flow Agrees: {order_flow_agrees}
+- Key Drivers: {', '.join(strat_reasons[:6])}
 
 RULES:
 - YOUR FINAL SIGNAL MUST EXACTLY MATCH THE STRATEGY DIRECTION ({strat_dir}).
+- IF SIGNAL GRADE IS 'F' OR 'C', USE 'NO_TRADE'.
 - IF THE RISK IS TOO HIGH OR CONTEXT IS BAD, YOU MAY DOWNGRADE TO 'NO_TRADE'.
 - YOU MAY NEVER CALL A 'LONG' IF THE STRATEGY IS 'SHORT', OR VICE VERSA.
 - Entry: within 0.5x ATR of {current_price}
@@ -821,8 +369,9 @@ Output ONLY valid JSON, no markdown:
     "ticker": "{ticker}",
     "timestamp_utc": "{datetime.utcnow().isoformat()}Z",
     "timeframe": "{tf}",
-    "market_regime": "trend_day_up|trend_day_down|range_day|high_vol_news|low_liquidity",
+    "market_regime": "{market_regime}",
     "signal": "LONG|SHORT|NO_TRADE",
+    "signal_grade": "{signal_grade}",
     "entry_zone": {{"min": 0, "max": 0}},
     "stop_loss": 0,
     "take_profit": [{{"level": 1, "price": 0}}, {{"level": 2, "price": 0}}],
@@ -862,6 +411,16 @@ Output ONLY valid JSON, no markdown:
                 "tv_alert": f"TICKER={ticker};TF={tf};SIG=NO_TRADE;CONF=0;"
             }
 
+        # Inject enhanced scoring metadata into signal
+        signal_data["signal_grade"] = signal_grade
+        signal_data["market_regime"] = market_regime
+        signal_data["confluences"] = confluences
+        signal_data["factors_aligned"] = factors_aligned
+        signal_data["order_flow_agrees"] = order_flow_agrees
+        signal_data["order_flow_bias"] = order_flow_data.get("summary", {}).get("overall_delta_bias", "NEUTRAL") if order_flow_data else "NEUTRAL"
+        signal_data["mtf_confluence_label"] = enhanced.get("mtf_confluence_label", "NEUTRAL")
+        signal_data["mtf_confluence_multiplier"] = enhanced.get("mtf_confluence_multiplier", 1.0)
+
         # Store signal in history and send Telegram alert
         await store_signal(signal_data)
         await send_telegram_alert(signal_data)
@@ -872,119 +431,57 @@ Output ONLY valid JSON, no markdown:
         yield emit("ERROR", {"text": f"Backend stream failed: {str(e)}"})
 
 
-# ═══════════════════════════════════════════════════════════
-#  PERSISTENT STORAGE (SQLite)
-# ═══════════════════════════════════════════════════════════
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "war_room.db")
-
-def _init_db():
-    """Initialize SQLite database with signals and outcomes tables."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS signals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-    try:
-        conn.execute("ALTER TABLE signals ADD COLUMN resolved INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS outcomes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
-
+# Initialize DB on import
 _init_db()
 
 
-async def store_signal(signal_data: dict):
-    """Store a signal in the SQLite database."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO signals (data, resolved) VALUES (?, 0)", (json.dumps(signal_data),))
-    conn.commit()
-    conn.close()
-
-
 # ═══════════════════════════════════════════════════════════
-#  TELEGRAM BOT ALERTS
+#  CHART DATA ENDPOINTS
 # ═══════════════════════════════════════════════════════════
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-
-async def send_telegram_alert(signal_data: dict):
-    """Send a formatted signal alert to Telegram."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return  # Telegram not configured, silently skip
-
-    try:
-        sig = signal_data.get("signal", "UNKNOWN")
-        ticker = signal_data.get("ticker", "???")
-        tf = signal_data.get("timeframe", "?")
-        confidence = signal_data.get("confidence", 0)
-        entry = signal_data.get("entry_zone", {})
-        sl = signal_data.get("stop_loss", 0)
-        tps = signal_data.get("take_profit", [])
-        rr = signal_data.get("risk_reward", 0)
-        reasons = signal_data.get("reasons", [])
-        regime = signal_data.get("market_regime", "unknown")
-
-        emoji = "🟢" if sig == "LONG" else "🔴" if sig == "SHORT" else "⚪"
-        
-        tp_lines = ""
-        for tp in tps:
-            tp_lines += f"  TP{tp.get('level', '?')}: {tp.get('price', 0)}\n"
-
-        reason_lines = "\n".join(f"  • {r}" for r in reasons[:3])
-
-        message = (
-            f"{emoji} *WAR ROOM SIGNAL*\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"*{sig}* `{ticker}` on `{tf}`\n"
-            f"Regime: `{regime}`\n\n"
-            f"📍 *Entry:* `{entry.get('min', 0)} - {entry.get('max', 0)}`\n"
-            f"🛑 *Stop:* `{sl}`\n"
-            f"🎯 *Targets:*\n{tp_lines}\n"
-            f"📊 R:R `{rr}` | Conf `{confidence}%`\n\n"
-            f"💡 *Rationale:*\n{reason_lines}\n\n"
-            f"🕐 {datetime.utcnow().strftime('%H:%M UTC')}"
-        )
-
-        import httpx
-        async with httpx.AsyncClient() as hclient:
-            await hclient.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "text": message,
-                    "parse_mode": "Markdown",
-                    "disable_web_page_preview": True,
-                },
-                timeout=5,
-            )
-    except Exception as e:
-        print(f"Telegram alert failed: {e}")
-
-
-# ═══════════════════════════════════════════════════════════
-#  CHART DATA ENDPOINT (for TradingView Lightweight Charts)
-# ═══════════════════════════════════════════════════════════
-
-class ChartRequest(BaseModel):
-    ticker: str
-    timeframe: str
 
 @app.post("/api/v1/chart-data")
+async def get_chart_data(req: ChartDataRequest):
+    try:
+        ticker = req.ticker.upper()
+        tf = req.timeframe
+
+        loop = asyncio.get_event_loop()
+        mtf_data = await loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf)
+
+        if "dataframes" not in mtf_data or tf not in mtf_data["dataframes"]:
+            return {"candles": []}
+
+        df = mtf_data["dataframes"][tf]
+
+        candles = []
+        for idx, row in df.iterrows():
+            candles.append({
+                "time": int(idx.timestamp()),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"])
+            })
+
+        # Compute order flow for chart overlays
+        of_data = compute_order_flow_summary(df) if len(df) >= 20 else {}
+
+        return {
+            "candles": candles,
+            "order_flow": {
+                "delta_bars": of_data.get("delta_bars", []),
+                "cvd": of_data.get("cvd", []),
+                "volume_profile": of_data.get("volume_profile", {}),
+                "vwap_bands": of_data.get("vwap_bands", {}),
+            } if of_data else {}
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "candles": []}
+
+
+@app.post("/api/v1/chart-data-full")
 async def chart_data_endpoint(request: ChartRequest):
     """Return OHLCV data + indicator overlays for TradingView Lightweight Charts."""
     ticker = request.ticker.upper()
@@ -1036,6 +533,9 @@ async def chart_data_endpoint(request: ChartRequest):
         # BB bands
         bb = _bollinger(close)
 
+        # Order flow data
+        of_data = compute_order_flow_summary(df) if len(df) >= 20 else {}
+
         return {
             "candles": candles,
             "indicators": {
@@ -1044,6 +544,13 @@ async def chart_data_endpoint(request: ChartRequest):
                 "vwap": vwap_data,
                 "bb": bb,
             },
+            "order_flow": {
+                "delta_bars": of_data.get("delta_bars", []),
+                "cvd": of_data.get("cvd", []),
+                "volume_profile": of_data.get("volume_profile", {}),
+                "vwap_bands": of_data.get("vwap_bands", {}),
+                "summary": of_data.get("summary", {}),
+            } if of_data else {},
             "ticker": ticker,
             "symbol": yf_symbol,
         }
@@ -1064,90 +571,13 @@ async def analyze_endpoint(request: AnalysisRequest):
     )
 
 @app.get("/api/v1/signals")
-async def get_signal_history(limit: int = 20):
-    """Return recent signal history from SQLite."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.execute(
-        "SELECT data FROM signals ORDER BY id DESC LIMIT ?", (limit,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    signals = [json.loads(row[0]) for row in rows]
-    return {"signals": signals, "total": len(signals)}
+async def signal_history_endpoint(limit: int = 20):
+    return get_signal_history(limit)
 
 
 # ═══════════════════════════════════════════════════════════
-#  WATCHLIST SCANNER (Quick-scan multiple tickers)
+#  WATCHLIST SCANNER
 # ═══════════════════════════════════════════════════════════
-
-DEFAULT_WATCHLIST = ["NQ1", "ES1", "AAPL", "NVDA", "TSLA", "BTCUSD", "GOLD", "AMZN"]
-
-class WatchlistRequest(BaseModel):
-    tickers: list[str] = DEFAULT_WATCHLIST
-    timeframe: str = "5m"
-
-def calculate_strategy_score(ema9, ema21, rsi, macd_hist, adx=None, vol_ratio=None, current_price=None, vwap=None):
-    """Deterministic, rule-based indicator scoring logic shared across AI signal, backtest, and watchlist."""
-    score = 0
-    signals = []
-
-    # EMA cross direction
-    if ema9 > ema21:
-        score += 20
-        signals.append("EMA9 > EMA21 (bullish)")
-    else:
-        score -= 20
-        signals.append("EMA9 < EMA21 (bearish)")
-
-    # RSI signals
-    if rsi is not None:
-        if rsi > 70:
-            score -= 15
-            signals.append(f"RSI overbought ({rsi})")
-        elif rsi < 30:
-            score += 15
-            signals.append(f"RSI oversold ({rsi})")
-        elif rsi > 55:
-            score += 10
-            signals.append(f"RSI bullish ({rsi})")
-        elif rsi < 45:
-            score -= 10
-            signals.append(f"RSI bearish ({rsi})")
-
-    # MACD histogram
-    if macd_hist is not None:
-        if macd_hist > 0:
-            score += 15
-            signals.append(f"MACD histogram positive ({macd_hist})")
-        else:
-            score -= 15
-            signals.append(f"MACD histogram negative ({macd_hist})")
-
-    # Optional enhancements
-    if adx is not None:
-        if adx > 25:
-            score = int(score * 1.3)
-            signals.append(f"Strong trend (ADX={adx})")
-        elif adx < 20:
-            score = int(score * 0.5)
-            signals.append(f"Weak trend (ADX={adx})")
-
-    if vol_ratio is not None and vol_ratio > 1.5:
-        score = int(score * 1.2)
-        signals.append(f"High volume ({vol_ratio}x)")
-
-    if current_price is not None and vwap is not None and vwap != current_price:
-        if current_price > vwap:
-            score += 5
-        else:
-            score -= 5
-
-    # Determine quick direction (-100 to +100)
-    score = max(-100, min(100, score))
-    direction = "LONG" if score > 15 else "SHORT" if score < -15 else "NO_TRADE"
-    
-    return score, direction, signals
-
 
 def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
     """Fast indicator-only scan (no AI) for watchlist ranking."""
@@ -1188,11 +618,19 @@ def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
         except:
             vwap = current_price
 
-        # Call unified strategy score function
-        score, direction, signals = calculate_strategy_score(
-            ema9, ema21, rsi, macd.get("MACD_histogram"),
-            adx=adx, vol_ratio=vol_ratio, current_price=current_price, vwap=vwap
-        )
+        hist = macd.get("MACD_histogram")
+
+        # Build indicators dict for enhanced scorer
+        indicators = compute_indicators(df)
+
+        # Order flow (lightweight — skip if too few bars)
+        of_data = compute_order_flow_summary(df) if len(df) >= 20 else {}
+
+        # Enhanced scoring
+        enhanced = calculate_enhanced_score(indicators, order_flow_data=of_data)
+        score = enhanced["score"]
+        direction = enhanced["direction"]
+        grade = enhanced["grade"]
 
         direction = "NEUTRAL" if direction == "NO_TRADE" else direction
 
@@ -1202,13 +640,16 @@ def quick_scan_ticker(ticker: str, timeframe: str) -> dict:
             "price": current_price,
             "direction": direction,
             "score": max(-100, min(100, score)),
+            "grade": grade,
+            "regime": enhanced["regime"],
             "rsi": rsi,
             "macd_hist": hist,
             "adx": adx,
             "ema_cross": "BULLISH" if ema9 > ema21 else "BEARISH",
             "vol_ratio": vol_ratio,
             "atr": atr,
-            "signals": signals[:4],
+            "order_flow_bias": of_data.get("summary", {}).get("overall_delta_bias", "NEUTRAL") if of_data else "NEUTRAL",
+            "signals": enhanced["signals"][:4],
         }
 
     except Exception as e:
@@ -1220,17 +661,13 @@ async def watchlist_scan(request: WatchlistRequest):
     """Scan multiple tickers and rank by signal strength."""
     loop = asyncio.get_event_loop()
 
-    # Scan all tickers concurrently
     tasks = [
         loop.run_in_executor(executor, quick_scan_ticker, t, request.timeframe)
         for t in request.tickers
     ]
     results = await asyncio.gather(*tasks)
 
-    # Sort by absolute score (strongest signals first)
     results = sorted(results, key=lambda x: abs(x.get("score", 0)), reverse=True)
-
-    # Find the best opportunity
     best = results[0] if results else None
 
     return {
@@ -1277,17 +714,12 @@ async def ask_model(model: str, prompt: str) -> dict:
         return {"model": model, "signal": "NO_TRADE", "confidence": 0, "error": str(e)[:100]}
 
 
-class ConsensusRequest(BaseModel):
-    ticker: str
-    timeframe: str = "5m"
-
 @app.post("/api/v1/consensus")
 async def multi_model_consensus(request: ConsensusRequest):
     """Run the same signal prompt through multiple AI models and aggregate."""
     ticker = request.ticker.upper()
     tf = request.timeframe
 
-    # Fetch real data for the prompt
     loop = asyncio.get_event_loop()
     scan = await loop.run_in_executor(executor, quick_scan_ticker, ticker, tf)
 
@@ -1307,11 +739,9 @@ ATR: {scan.get('atr', 'N/A')}
 Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['price']},"stop_loss":0,"take_profit":0,"reason":"string"}}
 """
 
-    # Query all models concurrently
     tasks = [ask_model(model, prompt) for model in CONSENSUS_MODELS]
     verdicts = await asyncio.gather(*tasks)
 
-    # Aggregate consensus
     signals = [v.get("signal", "NO_TRADE") for v in verdicts]
     long_count = signals.count("LONG")
     short_count = signals.count("SHORT")
@@ -1326,7 +756,6 @@ Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['
 
     avg_confidence = sum(v.get("confidence", 0) for v in verdicts) / max(len(verdicts), 1)
 
-    # Agreement score
     max_agreement = max(long_count, short_count, no_trade_count)
     agreement_pct = round((max_agreement / len(verdicts)) * 100)
 
@@ -1346,10 +775,6 @@ Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['
 # ═══════════════════════════════════════════════════════════
 #  ICT ENDPOINT
 # ═══════════════════════════════════════════════════════════
-
-class ICTRequest(BaseModel):
-    ticker: str
-    timeframe: str = "5m"
 
 @app.post("/api/v1/ict")
 async def ict_endpoint(request: ICTRequest):
@@ -1375,372 +800,59 @@ async def ict_endpoint(request: ICTRequest):
 
 
 # ═══════════════════════════════════════════════════════════
-#  BACKTESTING ENGINE
+#  ORDER FLOW ENDPOINT
 # ═══════════════════════════════════════════════════════════
 
-class BacktestRequest(BaseModel):
+class OrderFlowRequest(BaseModel):
     ticker: str
     timeframe: str = "5m"
-    lookback_days: int = 5
 
-def run_backtest(ticker: str, timeframe: str, lookback_days: int) -> dict:
-    """Replay signal scoring against historical data and calculate performance."""
+@app.post("/api/v1/order-flow")
+async def order_flow_endpoint(request: OrderFlowRequest):
+    """Return full order flow analysis for a ticker."""
+    ticker = request.ticker.upper()
     yf_symbol = resolve_ticker(ticker)
     tf_map = {
-        "1m": ("1m", "1d"), "5m": ("5m", f"{lookback_days}d"),
-        "15m": ("15m", f"{lookback_days}d"), "1h": ("1h", f"{lookback_days}d"),
+        "1m": ("1m", "1d"), "5m": ("5m", "5d"),
+        "15m": ("15m", "5d"), "1h": ("1h", "30d"),
     }
-    interval, period = tf_map.get(timeframe, ("5m", f"{lookback_days}d"))
+    interval, period = tf_map.get(request.timeframe, ("5m", "5d"))
 
     try:
+        loop = asyncio.get_event_loop()
         tk = yf.Ticker(yf_symbol)
-        df = tk.history(period=period, interval=interval)
+        df = await loop.run_in_executor(executor, lambda: tk.history(period=period, interval=interval))
+        if df.empty or len(df) < 20:
+            return {"error": "Insufficient data", "order_flow": {}}
 
-        if df.empty or len(df) < 50:
-            return {"error": "Insufficient data for backtest"}
-
-        trades = []
-        equity_curve = [10000]  # Start with $10k
-        current_idx = 30  # Start after warmup period
-
-        while current_idx < len(df) - 10:
-            window = df.iloc[:current_idx + 1]
-            close = window["Close"]
-            high = window["High"]
-            low = window["Low"]
-            volume = window["Volume"]
-
-            # Quick indicator scoring
-            rsi = _rsi(close, 14)
-            macd = _macd(close)
-            ema9 = float(_ema(close, 9).iloc[-1])
-            ema21 = float(_ema(close, 21).iloc[-1])
-            atr = _atr(high, low, close, 14) or 1
-            hist = macd.get("MACD_histogram")
-
-            score, direction, _ = calculate_strategy_score(ema9, ema21, rsi, hist)
-
-            # Only trade if score is strong enough
-            if direction != "NO_TRADE":
-                entry_price = float(close.iloc[-1])
-                sl = entry_price - (1.5 * atr) if direction == "LONG" else entry_price + (1.5 * atr)
-                tp = entry_price + (2 * atr) if direction == "LONG" else entry_price - (2 * atr)
-
-                # Simulate: check next 10 bars
-                future = df.iloc[current_idx + 1:current_idx + 11]
-                result = "OPEN"
-                exit_price = entry_price
-                for _, bar in future.iterrows():
-                    h = float(bar["High"])
-                    l = float(bar["Low"])
-                    if direction == "LONG":
-                        if l <= sl: result = "LOSS"; exit_price = sl; break
-                        if h >= tp: result = "WIN"; exit_price = tp; break
-                    else:
-                        if h >= sl: result = "LOSS"; exit_price = sl; break
-                        if l <= tp: result = "WIN"; exit_price = tp; break
-
-                if result == "OPEN":
-                    exit_price = float(future["Close"].iloc[-1]) if len(future) > 0 else entry_price
-                    pnl = exit_price - entry_price if direction == "LONG" else entry_price - exit_price
-                    result = "WIN" if pnl > 0 else "LOSS"
-
-                pnl = exit_price - entry_price if direction == "LONG" else entry_price - exit_price
-                pnl_pct = round((pnl / entry_price) * 100, 3)
-
-                trades.append({
-                    "direction": direction,
-                    "entry": round(entry_price, 2),
-                    "exit": round(exit_price, 2),
-                    "sl": round(sl, 2),
-                    "tp": round(tp, 2),
-                    "result": result,
-                    "pnl_pct": pnl_pct,
-                    "score": score,
-                })
-
-                # Update equity
-                pos_size = equity_curve[-1] * 0.02  # 2% risk
-                dollar_pnl = pos_size * (pnl_pct / 100)
-                equity_curve.append(round(equity_curve[-1] + dollar_pnl, 2))
-
-                current_idx += 10  # Skip forward after trade
-            else:
-                current_idx += 5  # Skip forward if no signal
-
-        # Calculate stats
-        wins = [t for t in trades if t["result"] == "WIN"]
-        losses = [t for t in trades if t["result"] == "LOSS"]
-        total = len(trades)
-        win_rate = round(len(wins) / total * 100, 1) if total > 0 else 0
-
-        avg_win = round(sum(t["pnl_pct"] for t in wins) / len(wins), 3) if wins else 0
-        avg_loss = round(sum(abs(t["pnl_pct"]) for t in losses) / len(losses), 3) if losses else 0
-        profit_factor = round(sum(t["pnl_pct"] for t in wins) / sum(abs(t["pnl_pct"]) for t in losses), 2) if losses and sum(abs(t["pnl_pct"]) for t in losses) > 0 else 999
-
-        # Max drawdown
-        peak = equity_curve[0]
-        max_dd = 0
-        for eq in equity_curve:
-            if eq > peak: peak = eq
-            dd = (peak - eq) / peak * 100
-            if dd > max_dd: max_dd = dd
-
-        # Sharpe ratio (simplified)
-        returns = [trades[i]["pnl_pct"] for i in range(len(trades))]
-        if len(returns) > 1:
-            avg_ret = sum(returns) / len(returns)
-            std_ret = (sum((r - avg_ret) ** 2 for r in returns) / len(returns)) ** 0.5
-            sharpe = round(avg_ret / std_ret, 2) if std_ret > 0 else 0
-        else:
-            sharpe = 0
-
-        return {
-            "ticker": ticker,
-            "timeframe": timeframe,
-            "total_trades": total,
-            "wins": len(wins),
-            "losses": len(losses),
-            "win_rate": win_rate,
-            "avg_win_pct": avg_win,
-            "avg_loss_pct": avg_loss,
-            "profit_factor": profit_factor,
-            "sharpe_ratio": sharpe,
-            "max_drawdown_pct": round(max_dd, 2),
-            "final_equity": equity_curve[-1],
-            "equity_change_pct": round((equity_curve[-1] - 10000) / 100, 2),
-            "trades": trades[-10:],  # Last 10 trades
-            "kelly_optimal_pct": calculate_kelly(win_rate / 100, avg_win, avg_loss),
-        }
-
+        of_data = compute_order_flow_summary(df)
+        return {"ticker": ticker, "timeframe": request.timeframe, "order_flow": of_data}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "order_flow": {}}
 
 
 # ═══════════════════════════════════════════════════════════
-#  KELLY CRITERION POSITION SIZING
+#  BACKTEST & OUTCOMES ENDPOINTS
 # ═══════════════════════════════════════════════════════════
-
-def calculate_kelly(win_rate: float, avg_win: float, avg_loss: float) -> dict:
-    """Calculate Kelly Criterion optimal position size."""
-    if avg_loss == 0 or win_rate == 0:
-        return {"full_kelly": 0, "half_kelly": 0, "quarter_kelly": 0, "recommended": 0}
-
-    b = avg_win / avg_loss  # win/loss ratio
-    p = win_rate
-    q = 1 - p
-
-    full = round((b * p - q) / b * 100, 2)
-    if full < 0:
-        full = 0
-
-    return {
-        "full_kelly": full,
-        "half_kelly": round(full / 2, 2),
-        "quarter_kelly": round(full / 4, 2),
-        "recommended": round(full / 4, 2),  # Quarter Kelly is safest
-        "win_rate": round(win_rate * 100, 1),
-        "avg_rr": round(b, 2),
-        "edge": round((b * p - q) * 100, 2),
-    }
-
 
 @app.post("/api/v1/backtest")
 async def backtest_endpoint(request: BacktestRequest):
-    """Run a backtest against historical data."""
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(executor, run_backtest, request.ticker, request.timeframe, request.lookback_days)
     return result
 
-
-# ═══════════════════════════════════════════════════════════
-#  AI SELF-LEARNING LOOP
-# ═══════════════════════════════════════════════════════════
-
-class OutcomeReport(BaseModel):
-    ticker: str
-    signal: str
-    entry: float
-    result: str  # WIN or LOSS
-    pnl_pct: float
-    notes: str = ""
-
 @app.post("/api/v1/outcomes/report")
-async def report_outcome(report: OutcomeReport):
-    """Report a signal outcome for the self-learning loop (SQLite)."""
-    outcome = {
-        **report.dict(),
-        "reported_at": datetime.utcnow().isoformat() + "Z",
-    }
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO outcomes (data) VALUES (?)", (json.dumps(outcome),))
-    conn.commit()
-    total = conn.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
-    conn.close()
-    return {"status": "recorded", "total_outcomes": total}
+async def report_outcome_endpoint(report: OutcomeReport):
+    return report_outcome(report.dict())
 
 @app.get("/api/v1/outcomes")
-async def get_outcomes():
-    """Get outcome history and performance stats for the self-learning prompt (SQLite)."""
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT data FROM outcomes ORDER BY id DESC LIMIT 100").fetchall()
-    conn.close()
-    outcome_list = [json.loads(row[0]) for row in rows]
-
-    total = len(outcome_list)
-    wins = sum(1 for o in outcome_list if o["result"] == "WIN")
-    losses = sum(1 for o in outcome_list if o["result"] == "LOSS")
-    win_rate = round(wins / total * 100, 1) if total > 0 else 0
-
-    # Build self-learning context string for AI
-    if total >= 5:
-        recent = outcome_list[:10]
-        context = f"SELF-LEARNING: {wins}W/{losses}L ({win_rate}% win rate) from {total} signals.\n"
-        for o in recent:
-            context += f"  {o['ticker']} {o['signal']} → {o['result']} ({o['pnl_pct']}%)\n"
-    else:
-        context = "SELF-LEARNING: Insufficient outcome data (<5 signals tracked)."
-
-    return {
-        "total": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "outcomes": outcome_list[:20],
-        "learning_context": context,
-    }
+async def get_outcomes_endpoint():
+    return get_outcomes()
 
 
 # ═══════════════════════════════════════════════════════════
-#  AUTO TRADE RESOLUTION (Background Task)
+#  WHALE ALERTS ENDPOINT
 # ═══════════════════════════════════════════════════════════
-
-async def monitor_active_trades():
-    """Background loop to track unresolved signals vs live market prices."""
-    while True:
-        try:
-            # Run every 60 seconds
-            await asyncio.sleep(60)
-            
-            conn = sqlite3.connect(DB_PATH)
-            # Only track signals from the last 24 hours that are unresolved
-            rows = conn.execute("SELECT id, data FROM signals WHERE resolved = 0 AND created_at >= datetime('now', '-1 day')").fetchall()
-            
-            if not rows:
-                conn.close()
-                continue
-            
-            signals_by_ticker = {}
-            for row in rows:
-                sid, data_str = row
-                try:
-                    data = json.loads(data_str)
-                    ticker = data.get("ticker")
-                    if not ticker:
-                        # Corrupted or NO_TRADE without ticker, mark resolved
-                        conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
-                        continue
-                        
-                    if data.get("signal") == "NO_TRADE":
-                        conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
-                        continue
-                        
-                    if ticker not in signals_by_ticker:
-                        signals_by_ticker[ticker] = []
-                    signals_by_ticker[ticker].append({"id": sid, "data": data})
-                except json.JSONDecodeError:
-                    conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
-            
-            conn.commit()
-
-            # Poll live prices for each unique ticker
-            for ticker, open_signals in signals_by_ticker.items():
-                yf_symbol = resolve_ticker(ticker)
-                try:
-                    loop = asyncio.get_event_loop()
-                    tk = yf.Ticker(yf_symbol)
-                    # Fetching 1d 1m to get the absolute latest close
-                    df = await loop.run_in_executor(executor, lambda: tk.history(period="1d", interval="1m"))
-                    
-                    if df.empty:
-                        continue
-                        
-                    current_price = df['Close'].iloc[-1]
-                    
-                    for sig_info in open_signals:
-                        sid = sig_info["id"]
-                        sig = sig_info["data"]
-                        direction = sig.get("signal")
-                        entry_zone = sig.get("entry_zone", {})
-                        
-                        # Use entry_mid as standard entry if not explicitly recorded
-                        if "min" in entry_zone and "max" in entry_zone:
-                            entry = (entry_zone["min"] + entry_zone["max"]) / 2
-                        else:
-                            entry = current_price  # fallback
-                            
-                        sl = sig.get("stop_loss", 0)
-                        tps = sig.get("take_profit", [])
-                        tp1 = tps[0]["price"] if tps and len(tps) > 0 else 0
-                        
-                        if not sl or not tp1:
-                            # Cannot resolve without targets
-                            continue
-
-                        outcome_result = None
-                        pnl_pct = 0.0
-
-                        if direction == "LONG":
-                            if current_price <= sl:
-                                outcome_result = "LOSS"
-                                pnl_pct = ((sl - entry) / entry) * 100
-                            elif current_price >= tp1:
-                                outcome_result = "WIN"
-                                pnl_pct = ((current_price - entry) / entry) * 100
-                        
-                        elif direction == "SHORT":
-                            if current_price >= sl:
-                                outcome_result = "LOSS"
-                                pnl_pct = ((entry - sl) / entry) * 100
-                            elif current_price <= tp1:
-                                outcome_result = "WIN"
-                                pnl_pct = ((entry - current_price) / entry) * 100
-
-                        if outcome_result:
-                            # Record outcome
-                            outcome_dict = {
-                                "ticker": ticker,
-                                "signal": direction,
-                                "entry": entry,
-                                "result": outcome_result,
-                                "pnl_pct": round(float(pnl_pct), 2),
-                                "notes": f"Auto-resolved at {round(float(current_price), 2)}",
-                                "reported_at": datetime.utcnow().isoformat() + "Z",
-                            }
-                            conn.execute("INSERT INTO outcomes (data) VALUES (?)", (json.dumps(outcome_dict),))
-                            conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
-                            
-                except Exception as e:
-                    print(f"Error fetching live data for auto-tracker {ticker}: {e}")
-                    
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            print(f"Monitor active trades crashed: {e}")
-            await asyncio.sleep(60)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Start background tasks on application launch."""
-    asyncio.create_task(monitor_active_trades())
-
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "service": "war-room-ai", "version": "5.0-sprint4"}
-
 
 @app.get("/api/v1/whale-alerts")
 async def get_whale_alerts(ticker: str):
@@ -1748,3 +860,18 @@ async def get_whale_alerts(ticker: str):
     loop = asyncio.get_event_loop()
     alerts = await loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker.upper())
     return {"ticker": ticker.upper(), "alerts": [w.__dict__ for w in alerts]}
+
+
+# ═══════════════════════════════════════════════════════════
+#  STARTUP & HEALTH
+# ═══════════════════════════════════════════════════════════
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on application launch."""
+    asyncio.create_task(monitor_active_trades(executor, resolve_ticker))
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "war-room-ai", "version": "6.0-order-flow"}
