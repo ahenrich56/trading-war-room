@@ -21,7 +21,7 @@ import { WhaleAlertsPanel } from "@/components/WhaleAlertsPanel";
 import { OrderFlowPanel } from "@/components/OrderFlowPanel";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Activity, LayoutDashboard, Users, Bird, LineChart, Target, Settings, X, Menu, BarChart3 } from "lucide-react";
+import { Activity, LayoutDashboard, Users, Target, Settings, X, Menu } from "lucide-react";
 
 
 
@@ -55,7 +55,12 @@ export default function WarRoomDashboard() {
   // Chart + History state
   const [chartData, setChartData] = useState<any>(null);
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
-  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "ict" | "backtest" | "outcomes" | "orderflow">("chart");
+  const [activeTab, setActiveTab] = useState<"chart" | "history" | "watchlist" | "consensus" | "outcomes">("chart");
+
+  // Toggleable detail panels on main chart view
+  const [showIct, setShowIct] = useState(false);
+  const [showOrderFlow, setShowOrderFlow] = useState(false);
+  const [showBacktest, setShowBacktest] = useState(false);
 
   // Watchlist + Consensus state
   const [watchlistData, setWatchlistData] = useState<any>(null);
@@ -430,15 +435,6 @@ export default function WarRoomDashboard() {
           <button onClick={() => { setActiveTab("consensus"); if (!consensusData) runConsensus(); }} className={`p-3 rounded-xl transition-all ${activeTab === "consensus" ? "bg-amber-500/10 text-amber-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <Users className="h-6 w-6" />
           </button>
-          <button onClick={() => { setActiveTab("ict"); }} className={`p-3 rounded-xl transition-all ${activeTab === "ict" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}>
-            <Bird className="h-6 w-6" />
-          </button>
-          <button onClick={() => { setActiveTab("orderflow"); }} className={`p-3 rounded-xl transition-all ${activeTab === "orderflow" ? "bg-violet-500/10 text-violet-400" : "text-[#4A4A6A] hover:text-white"}`}>
-            <BarChart3 className="h-6 w-6" />
-          </button>
-          <button onClick={() => { setActiveTab("backtest"); }} className={`p-3 rounded-xl transition-all ${activeTab === "backtest" ? "bg-orange-500/10 text-orange-400" : "text-[#4A4A6A] hover:text-white"}`}>
-            <LineChart className="h-6 w-6" />
-          </button>
           <button onClick={() => { setActiveTab("outcomes"); }} className={`p-3 rounded-xl transition-all ${activeTab === "outcomes" ? "bg-pink-500/10 text-pink-400" : "text-[#4A4A6A] hover:text-white"}`}>
             <Target className="h-6 w-6" />
           </button>
@@ -459,11 +455,9 @@ export default function WarRoomDashboard() {
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-extrabold text-white tracking-widest uppercase flex items-center gap-2">
                   {activeTab === "chart" ? "AI TRADING WAR ROOM" :
-                   activeTab === "backtest" ? "BACKTEST STUDIO" :
-                   activeTab === "ict" ? "SMART MONEY CONCEPTS" :
                    activeTab === "consensus" ? "CONSENSUS ENGINE" :
-                   activeTab === "orderflow" ? "ORDER FLOW ANALYSIS" :
-                   "OUTCOMES & PERFORMANCE"}
+                   activeTab === "outcomes" ? "OUTCOMES & PERFORMANCE" :
+                   "AI TRADING WAR ROOM"}
                    {backendStatus === "error" && (
                     <span className="text-xs text-red-500 font-normal uppercase tracking-normal hidden sm:inline">(Offline)</span>
                   )}
@@ -479,9 +473,8 @@ export default function WarRoomDashboard() {
               </div>
               <span className="text-sm text-[#8A8AAA]">
                  {activeTab === "chart" ? "Real-Time Multi-Agent Analysis" :
-                  activeTab === "backtest" ? "Historical Strategy Optimization & Win-Rates" :
-                  activeTab === "ict" ? "Real-Time Liquidity, FVG & Order Block Detection" :
-                  activeTab === "orderflow" ? "Delta, CVD, Volume Profile & Divergence Detection" :
+                  activeTab === "consensus" ? "Multi-Model Voting System" :
+                  activeTab === "outcomes" ? "Win Rate & Performance Tracking" :
                   "Institutional Grade Market Tracking"}
               </span>
             </div>
@@ -607,37 +600,7 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              ðŸ—³ï¸ CONSENSUS
-            </button>
-            <button
-              onClick={() => { setActiveTab("ict"); }}
-              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
-                activeTab === "ict"
-                  ? "text-emerald-400 border-b-2 border-emerald-500 bg-emerald-500/5"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              ðŸ¦ ICT
-            </button>
-            <button
-              onClick={() => { setActiveTab("orderflow"); }}
-              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
-                activeTab === "orderflow"
-                  ? "text-violet-400 border-b-2 border-violet-500 bg-violet-500/5"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              ORDER FLOW
-            </button>
-            <button
-              onClick={() => { setActiveTab("backtest"); }}
-              className={`px-6 py-3 text-xs font-bold tracking-widest transition-all ${
-                activeTab === "backtest"
-                  ? "text-orange-400 border-b-2 border-orange-500 bg-orange-500/5"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              ðŸ“ˆ BACKTEST
+              CONSENSUS
             </button>
             <button
               onClick={() => { setActiveTab("outcomes"); if (!outcomesData) loadOutcomes(); }}
@@ -647,13 +610,52 @@ export default function WarRoomDashboard() {
                   : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              ðŸŽ¯ PERFORMANCE
+              PERFORMANCE
             </button>
           </div>
 
           {activeTab === "chart" && (
-            <div className="p-4">
+            <div className="p-4 space-y-4">
               <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
+
+              {/* Toggle buttons for detail panels */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowIct(prev => !prev)}
+                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
+                    showIct ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
+                  }`}
+                >
+                  ICT / SMART MONEY {showIct ? "ON" : "OFF"}
+                </button>
+                <button
+                  onClick={() => setShowOrderFlow(prev => !prev)}
+                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
+                    showOrderFlow ? "text-violet-400 border-violet-500/40 bg-violet-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
+                  }`}
+                >
+                  ORDER FLOW {showOrderFlow ? "ON" : "OFF"}
+                </button>
+                <button
+                  onClick={() => setShowBacktest(prev => !prev)}
+                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
+                    showBacktest ? "text-orange-400 border-orange-500/40 bg-orange-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
+                  }`}
+                >
+                  BACKTEST {showBacktest ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              {/* Toggleable detail panels */}
+              {showIct && (
+                <ICTPanel data={ictData} isRunning={isIctRunning} ticker={ticker} />
+              )}
+              {showOrderFlow && (
+                <OrderFlowPanel data={orderFlowData} ticker={ticker} mtfData={mtfOrderFlowData} />
+              )}
+              {showBacktest && (
+                <BacktestPanel data={backtestData} isRunning={isBacktesting} ticker={ticker} />
+              )}
             </div>
           )}
 
@@ -706,24 +708,6 @@ export default function WarRoomDashboard() {
           {activeTab === "consensus" && (
             <div className="p-4">
               <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
-            </div>
-          )}
-
-          {activeTab === "ict" && (
-            <div className="p-4">
-              <ICTPanel data={ictData} isRunning={isIctRunning} ticker={ticker} />
-            </div>
-          )}
-
-          {activeTab === "orderflow" && (
-            <div className="p-4">
-              <OrderFlowPanel data={orderFlowData} ticker={ticker} mtfData={mtfOrderFlowData} />
-            </div>
-          )}
-
-          {activeTab === "backtest" && (
-            <div className="p-4">
-              <BacktestPanel data={backtestData} isRunning={isBacktesting} ticker={ticker} />
             </div>
           )}
 
