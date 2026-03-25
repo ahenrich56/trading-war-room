@@ -622,7 +622,7 @@ export default function WarRoomDashboard() {
 
           {activeTab === "chart" && (
             <div className="p-0">
-              <TradingViewChart ticker={ticker} timeframe={timeframe} />
+              <TradingViewChart ticker={ticker} timeframe={timeframe} signal={signal} />
             </div>
           )}
 

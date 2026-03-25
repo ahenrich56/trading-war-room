@@ -631,6 +631,40 @@ async def ask_ai(role: str, prompt: str, max_tokens: int = 300, learning_context
 #  MAIN ANALYSIS STREAM
 # ═══════════════════════════════════════════════════════════
 
+class ChartDataRequest(BaseModel):
+    ticker: str
+    timeframe: str = "5m"
+
+@app.post("/api/v1/chart-data")
+async def get_chart_data(req: ChartDataRequest):
+    try:
+        ticker = req.ticker.upper()
+        tf = req.timeframe
+        
+        loop = asyncio.get_event_loop()
+        mtf_data = await loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf)
+        
+        if "dataframes" not in mtf_data or tf not in mtf_data["dataframes"]:
+            return {"candles": []}
+            
+        df = mtf_data["dataframes"][tf]
+        
+        candles = []
+        for idx, row in df.iterrows():
+            candles.append({
+                "time": int(idx.timestamp()),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"])
+            })
+            
+        return {"candles": candles}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "candles": []}
+
 async def generate_analysis_stream(req: AnalysisRequest):
     ticker = req.ticker.upper()
     tf = req.timeframe
@@ -855,6 +889,11 @@ def _init_db():
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    try:
+        conn.execute("ALTER TABLE signals ADD COLUMN resolved INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS outcomes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -871,7 +910,7 @@ _init_db()
 async def store_signal(signal_data: dict):
     """Store a signal in the SQLite database."""
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO signals (data) VALUES (?)", (json.dumps(signal_data),))
+    conn.execute("INSERT INTO signals (data, resolved) VALUES (?, 0)", (json.dumps(signal_data),))
     conn.commit()
     conn.close()
 
@@ -1570,6 +1609,132 @@ async def get_outcomes():
         "outcomes": outcome_list[:20],
         "learning_context": context,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+#  AUTO TRADE RESOLUTION (Background Task)
+# ═══════════════════════════════════════════════════════════
+
+async def monitor_active_trades():
+    """Background loop to track unresolved signals vs live market prices."""
+    while True:
+        try:
+            # Run every 60 seconds
+            await asyncio.sleep(60)
+            
+            conn = sqlite3.connect(DB_PATH)
+            # Only track signals from the last 24 hours that are unresolved
+            rows = conn.execute("SELECT id, data FROM signals WHERE resolved = 0 AND created_at >= datetime('now', '-1 day')").fetchall()
+            
+            if not rows:
+                conn.close()
+                continue
+            
+            signals_by_ticker = {}
+            for row in rows:
+                sid, data_str = row
+                try:
+                    data = json.loads(data_str)
+                    ticker = data.get("ticker")
+                    if not ticker:
+                        # Corrupted or NO_TRADE without ticker, mark resolved
+                        conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
+                        continue
+                        
+                    if data.get("signal") == "NO_TRADE":
+                        conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
+                        continue
+                        
+                    if ticker not in signals_by_ticker:
+                        signals_by_ticker[ticker] = []
+                    signals_by_ticker[ticker].append({"id": sid, "data": data})
+                except json.JSONDecodeError:
+                    conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
+            
+            conn.commit()
+
+            # Poll live prices for each unique ticker
+            for ticker, open_signals in signals_by_ticker.items():
+                yf_symbol = resolve_ticker(ticker)
+                try:
+                    loop = asyncio.get_event_loop()
+                    tk = yf.Ticker(yf_symbol)
+                    # Fetching 1d 1m to get the absolute latest close
+                    df = await loop.run_in_executor(executor, lambda: tk.history(period="1d", interval="1m"))
+                    
+                    if df.empty:
+                        continue
+                        
+                    current_price = df['Close'].iloc[-1]
+                    
+                    for sig_info in open_signals:
+                        sid = sig_info["id"]
+                        sig = sig_info["data"]
+                        direction = sig.get("signal")
+                        entry_zone = sig.get("entry_zone", {})
+                        
+                        # Use entry_mid as standard entry if not explicitly recorded
+                        if "min" in entry_zone and "max" in entry_zone:
+                            entry = (entry_zone["min"] + entry_zone["max"]) / 2
+                        else:
+                            entry = current_price  # fallback
+                            
+                        sl = sig.get("stop_loss", 0)
+                        tps = sig.get("take_profit", [])
+                        tp1 = tps[0]["price"] if tps and len(tps) > 0 else 0
+                        
+                        if not sl or not tp1:
+                            # Cannot resolve without targets
+                            continue
+
+                        outcome_result = None
+                        pnl_pct = 0.0
+
+                        if direction == "LONG":
+                            if current_price <= sl:
+                                outcome_result = "LOSS"
+                                pnl_pct = ((sl - entry) / entry) * 100
+                            elif current_price >= tp1:
+                                outcome_result = "WIN"
+                                pnl_pct = ((current_price - entry) / entry) * 100
+                        
+                        elif direction == "SHORT":
+                            if current_price >= sl:
+                                outcome_result = "LOSS"
+                                pnl_pct = ((entry - sl) / entry) * 100
+                            elif current_price <= tp1:
+                                outcome_result = "WIN"
+                                pnl_pct = ((entry - current_price) / entry) * 100
+
+                        if outcome_result:
+                            # Record outcome
+                            outcome_dict = {
+                                "ticker": ticker,
+                                "signal": direction,
+                                "entry": entry,
+                                "result": outcome_result,
+                                "pnl_pct": round(float(pnl_pct), 2),
+                                "notes": f"Auto-resolved at {round(float(current_price), 2)}",
+                                "reported_at": datetime.utcnow().isoformat() + "Z",
+                            }
+                            conn.execute("INSERT INTO outcomes (data) VALUES (?)", (json.dumps(outcome_dict),))
+                            conn.execute("UPDATE signals SET resolved = 1 WHERE id = ?", (sid,))
+                            
+                except Exception as e:
+                    print(f"Error fetching live data for auto-tracker {ticker}: {e}")
+                    
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"Monitor active trades crashed: {e}")
+            await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on application launch."""
+    asyncio.create_task(monitor_active_trades())
 
 
 @app.get("/health")

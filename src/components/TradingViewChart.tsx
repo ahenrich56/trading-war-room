@@ -1,102 +1,192 @@
 "use client";
 
-import { useEffect, useRef, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
+import { createChart, IChartApi, ISeriesApi, LineStyle, CandlestickSeries } from "lightweight-charts";
 
 interface TradingViewChartProps {
   ticker: string;
   timeframe: string;
+  signal?: any;
 }
 
-function TradingViewChartInner({ ticker, timeframe }: TradingViewChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Map common shorthand tickers to TradingView symbols
-  // NOTE: CME futures feeds are restricted on the free embedded widget,
-  // so we use CFD/index equivalents that provide full intraday data
-  const TV_SYMBOL_MAP: Record<string, string> = {
-    // ── Index Futures → CFD/Index equivalents ──
-    "NQ": "PEPPERSTONE:NAS100", "NQ1": "PEPPERSTONE:NAS100", "NASDAQ": "PEPPERSTONE:NAS100", "MNQ": "PEPPERSTONE:NAS100",
-    "ES": "PEPPERSTONE:US500", "ES1": "PEPPERSTONE:US500", "SPX": "SP:SPX", "MES": "PEPPERSTONE:US500",
-    "YM": "PEPPERSTONE:US30", "YM1": "PEPPERSTONE:US30", "DOW": "PEPPERSTONE:US30", "MYM": "PEPPERSTONE:US30",
-    "RTY": "PEPPERSTONE:US2000", "RTY1": "PEPPERSTONE:US2000", "M2K": "PEPPERSTONE:US2000",
-    // ── Commodities ──
-    "CL": "PEPPERSTONE:USOIL", "CL1": "PEPPERSTONE:USOIL", "OIL": "PEPPERSTONE:USOIL",
-    "GC": "PEPPERSTONE:XAUUSD", "GC1": "PEPPERSTONE:XAUUSD", "GOLD": "PEPPERSTONE:XAUUSD", "XAUUSD": "PEPPERSTONE:XAUUSD",
-    "SI": "PEPPERSTONE:XAGUSD", "SI1": "PEPPERSTONE:XAGUSD", "SILVER": "PEPPERSTONE:XAGUSD",
-    "NG": "PEPPERSTONE:NATGAS", "NG1": "PEPPERSTONE:NATGAS",
-    // ── Bonds ──
-    "ZB": "CBOT:ZB1!", "ZB1": "CBOT:ZB1!", "ZN": "CBOT:ZN1!", "ZN1": "CBOT:ZN1!",
-    // ── Crypto ──
-    "BTCUSD": "COINBASE:BTCUSD", "BTC": "COINBASE:BTCUSD",
-    "ETHUSD": "COINBASE:ETHUSD", "ETH": "COINBASE:ETHUSD",
-    "SOLUSD": "COINBASE:SOLUSD", "SOL": "COINBASE:SOLUSD",
-    // ── Forex ──
-    "DXY": "TVC:DXY",
-    "EURUSD": "FX:EURUSD", "GBPUSD": "FX:GBPUSD", "USDJPY": "FX:USDJPY",
-  };
-
-  const tvSymbol = TV_SYMBOL_MAP[ticker.toUpperCase()] || ticker;
-
-  // Map our timeframes to TradingView intervals
-  const tvInterval = (() => {
-    switch (timeframe) {
-      case "1m": return "1";
-      case "5m": return "5";
-      case "15m": return "15";
-      case "1h": return "60";
-      case "4h": return "240";
-      case "1d": return "D";
-      default: return "5";
-    }
-  })();
+function TradingViewChartInner({ ticker, timeframe, signal }: TradingViewChartProps) {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<any>(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!chartContainerRef.current) return;
 
-    // Clear previous widget
-    containerRef.current.innerHTML = "";
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      autosize: true,
-      symbol: tvSymbol,
-      interval: tvInterval,
-      timezone: "Etc/UTC",
-      theme: "dark",
-      style: "1",
-      locale: "en",
-      backgroundColor: "rgba(5, 5, 10, 1)",
-      gridColor: "rgba(255, 255, 255, 0.03)",
-      hide_top_toolbar: false,
-      hide_legend: false,
-      allow_symbol_change: true,
-      save_image: true,
-      calendar: false,
-      hide_volume: false,
-      support_host: "https://www.tradingview.com",
-      studies: [
-        "STD;EMA",
-        "STD;VWAP"
-      ],
-      overrides: {
-        "mainSeriesProperties.candleStyle.upColor": "#22c55e",
-        "mainSeriesProperties.candleStyle.downColor": "#ef4444",
-        "mainSeriesProperties.candleStyle.borderUpColor": "#22c55e",
-        "mainSeriesProperties.candleStyle.borderDownColor": "#ef4444",
-        "mainSeriesProperties.candleStyle.wickUpColor": "#22c55e",
-        "mainSeriesProperties.candleStyle.wickDownColor": "#ef4444",
+    // Initialize chart
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: "solid", color: "rgba(5, 5, 10, 1)" },
+        textColor: "#D1D5DB",
+      },
+      grid: {
+        vertLines: { color: "rgba(255, 255, 255, 0.03)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.03)" },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderVisible: false,
+      },
+      rightPriceScale: {
+        borderVisible: false,
+      },
+      crosshair: {
+        mode: 0,
       },
     });
 
-    containerRef.current.appendChild(script);
-  }, [tvSymbol, tvInterval]);
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    chartRef.current = chart;
+    seriesRef.current = series;
+
+    const handleResize = () => {
+      chart.applyOptions({ width: chartContainerRef.current?.clientWidth });
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+    };
+  }, []);
+
+  // Fetch data
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    setDataLoaded(false);
+    
+    let isMounted = true;
+
+    async function fetchData() {
+      try {
+        const res = await fetch("/api/chart-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker, timeframe })
+        });
+        const json = await res.json();
+        if (isMounted && json.candles && json.candles.length > 0) {
+          // ensure data is sorted by time and unique
+          const sorted = [...json.candles].sort((a: any, b: any) => a.time - b.time);
+          
+          // Lightweight charts requires strictly distinct increasing time values
+          const uniqueCandles = [];
+          const seenTimes = new Set();
+          for (const c of sorted) {
+            if (!seenTimes.has(c.time)) {
+              seenTimes.add(c.time);
+              uniqueCandles.push(c);
+            }
+          }
+          
+          seriesRef.current?.setData(uniqueCandles);
+          setDataLoaded(true);
+        }
+      } catch (e) {
+        console.error("Failed to load chart data:", e);
+      }
+    }
+
+    fetchData();
+    // Poll every 10 seconds for real-time updates
+    const interval = setInterval(fetchData, 10000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [ticker, timeframe]);
+
+  // Set Entry, SL, TP lines
+  const entryLineRef = useRef<any>(null);
+  const slLineRef = useRef<any>(null);
+  const tp1LineRef = useRef<any>(null);
+  const tp2LineRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!seriesRef.current || !dataLoaded || !signal) return;
+
+    // Clear old lines
+    if (entryLineRef.current) seriesRef.current.removePriceLine(entryLineRef.current);
+    if (slLineRef.current) seriesRef.current.removePriceLine(slLineRef.current);
+    if (tp1LineRef.current) seriesRef.current.removePriceLine(tp1LineRef.current);
+    if (tp2LineRef.current) seriesRef.current.removePriceLine(tp2LineRef.current);
+
+    // Don't draw if the active signal is for a different ticker than the chart is currently showing
+    if (signal.ticker?.toUpperCase() !== ticker.toUpperCase()) return;
+
+    const sigDir = signal.signal;
+    if (sigDir === "NO_TRADE" || !signal.entry_zone) return;
+
+    const entryMid = (signal.entry_zone.min + signal.entry_zone.max) / 2;
+
+    entryLineRef.current = seriesRef.current.createPriceLine({
+      price: entryMid || signal.entry_zone.max,
+      color: "#06b6d4", // Cyan
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "ENTRY",
+    });
+
+    if (signal.stop_loss) {
+      slLineRef.current = seriesRef.current.createPriceLine({
+        price: signal.stop_loss,
+        color: "#ef4444", // Red
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: "SL",
+      });
+    }
+
+    if (signal.take_profit && signal.take_profit.length > 0) {
+      tp1LineRef.current = seriesRef.current.createPriceLine({
+        price: signal.take_profit[0],
+        color: "#22c55e", // Green
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: "TP1",
+      });
+
+      if (signal.take_profit.length > 1) {
+        tp2LineRef.current = seriesRef.current.createPriceLine({
+          price: signal.take_profit[1],
+          color: "#22c55e", 
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: "TP2",
+        });
+      }
+    }
+  }, [signal, dataLoaded, ticker]);
 
   return (
-    <div className="tradingview-widget-container w-full" style={{ height: "500px" }}>
-      <div ref={containerRef} className="tradingview-widget-container__widget w-full h-full" />
+    <div className="w-full relative" style={{ height: "500px" }}>
+      {!dataLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10 transition-opacity">
+          <div className="flex items-center gap-3">
+            <div className="w-4 h-4 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin"></div>
+            <span className="text-cyan-500 font-mono text-sm uppercase tracking-widest">Loading Live Data...</span>
+          </div>
+        </div>
+      )}
+      <div ref={chartContainerRef} className="w-full h-full" />
     </div>
   );
 }
