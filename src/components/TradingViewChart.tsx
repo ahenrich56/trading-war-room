@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, memo } from "react";
-import { createChart, IChartApi, ISeriesApi, LineStyle, CandlestickSeries } from "lightweight-charts";
+import { createChart, IChartApi, ISeriesApi, LineStyle, CandlestickSeries, ColorType } from "lightweight-charts";
 
 interface TradingViewChartProps {
   ticker: string;
@@ -21,7 +21,7 @@ function TradingViewChartInner({ ticker, timeframe, signal }: TradingViewChartPr
     // Initialize chart
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { type: "solid", color: "rgba(5, 5, 10, 1)" },
+        background: { type: ColorType.Solid, color: "rgba(5, 5, 10, 1)" },
         textColor: "#D1D5DB",
       },
       grid: {
