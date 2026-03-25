@@ -140,12 +140,21 @@ export default function WarRoomDashboard() {
     }
   }, []);
 
-  // Auto-refresh chart when ticker changes (debounced)
+  // Auto-refresh chart when ticker changes and poll for real-time updates
   useEffect(() => {
     const timer = setTimeout(() => {
       if (ticker.length >= 1) loadChartData(ticker, timeframe);
     }, 600);
-    return () => clearTimeout(timer);
+
+    // Poll every 10 seconds for live data
+    const intervalId = setInterval(() => {
+      if (ticker.length >= 1) loadChartData(ticker, timeframe);
+    }, 10000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(intervalId);
+    };
   }, [ticker, timeframe, loadChartData]);
 
   // Load outcomes data

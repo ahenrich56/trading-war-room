@@ -26,31 +26,54 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
   useEffect(() => {
     if (!lwcLoaded || !lwcModule || !containerRef.current || !chartData?.candles?.length) return;
 
-    // Clear previous chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
+    // Initialize chart if it doesn't exist
+    if (!chartRef.current) {
+      const chart = lwcModule.createChart(containerRef.current, {
+        layout: { background: { color: "transparent" }, textColor: "#94a3b8" },
+        grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.03)" } },
+        width: containerRef.current.clientWidth,
+        height: 350,
+        crosshair: { mode: 0 },
+        rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
+        timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: true, secondsVisible: false },
+      });
+
+      chart.candleSeries = chart.addCandlestickSeries({
+        upColor: "#22c55e",
+        downColor: "#ef4444",
+        borderUpColor: "#22c55e",
+        borderDownColor: "#ef4444",
+        wickUpColor: "#22c55e",
+        wickDownColor: "#ef4444",
+      });
+
+      chart.volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: "volume" },
+        priceScaleId: "",
+      });
+      chart.volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.85, bottom: 0 },
+      });
+
+      chart.ema9Series = chart.addLineSeries({ color: "#67e8f9", lineWidth: 1, priceLineVisible: false });
+      chart.ema21Series = chart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false });
+      chart.vwapSeries = chart.addLineSeries({ color: "#a78bfa", lineWidth: 1, lineStyle: 2, priceLineVisible: false });
+
+      chart.priceLines = [];
+      chartRef.current = chart;
+
+      const handleResize = () => {
+        if (containerRef.current && chartRef.current) {
+          chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+        }
+      };
+      window.addEventListener("resize", handleResize);
+      chart.cleanupResize = () => window.removeEventListener("resize", handleResize);
     }
 
-    const chart = lwcModule.createChart(containerRef.current, {
-      layout: { background: { color: "transparent" }, textColor: "#94a3b8" },
-      grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.03)" } },
-      width: containerRef.current.clientWidth,
-      height: 350,
-      crosshair: { mode: 0 },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: true, secondsVisible: false },
-    });
+    const chart = chartRef.current;
 
-    // Candlestick series
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
+    // Process and dedup data
     const uniqueCandles: any[] = [];
     const seenTimes = new Set();
     const sortedCandles = [...chartData.candles].sort((a: any, b: any) => a.time - b.time);
@@ -68,103 +91,92 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
       low: c.low,
       close: c.close,
     }));
-    candleSeries.setData(candleData);
+    // Note: If using `setData()`, it replaces the whole array. If it's the exact same data, it doesn't flicker.
+    // However, if initial zoom was changed by user, setData() might reset the zoom.
+    // To be perfectly smooth, setData is usually fine as long as there's a small logical range change handling.
+    // For now, setData() is what we used before and is required if we are completely replacing historical data points.
+    chart.candleSeries.setData(candleData);
 
-    // Volume
-    const volumeSeries = chart.addHistogramSeries({
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },
-    });
     const volData = uniqueCandles.map((c: any) => ({
       time: c.time,
       value: c.volume,
       color: c.close >= c.open ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)",
     }));
-    volumeSeries.setData(volData);
+    chart.volumeSeries.setData(volData);
 
-    // EMA 9 overlay
-    if (chartData.indicators?.ema9?.length) {
-      const ema9Series = chart.addLineSeries({ color: "#67e8f9", lineWidth: 1, priceLineVisible: false });
-      ema9Series.setData(chartData.indicators.ema9);
+    if (chartData.indicators?.ema9?.length) chart.ema9Series.setData(chartData.indicators.ema9);
+    if (chartData.indicators?.ema21?.length) chart.ema21Series.setData(chartData.indicators.ema21);
+    if (chartData.indicators?.vwap?.length) chart.vwapSeries.setData(chartData.indicators.vwap);
+
+    // Update signal lines
+    if (chart.priceLines) {
+      chart.priceLines.forEach((l: any) => {
+        try { chart.candleSeries.removePriceLine(l); } catch(e){}
+      });
     }
+    chart.priceLines = [];
 
-    // EMA 21 overlay
-    if (chartData.indicators?.ema21?.length) {
-      const ema21Series = chart.addLineSeries({ color: "#fbbf24", lineWidth: 1, priceLineVisible: false });
-      ema21Series.setData(chartData.indicators.ema21);
-    }
-
-    // VWAP overlay
-    if (chartData.indicators?.vwap?.length) {
-      const vwapSeries = chart.addLineSeries({ color: "#a78bfa", lineWidth: 1, lineStyle: 2, priceLineVisible: false });
-      vwapSeries.setData(chartData.indicators.vwap);
-    }
-
-    // Signal levels (entry zone, SL, TP)
     if (signal && signal.signal !== "NO_TRADE") {
       const entryColor = signal.signal === "LONG" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
       
       if (signal.entry_zone && signal.entry_zone.min !== undefined && signal.entry_zone.max !== undefined) {
-        candleSeries.createPriceLine({
+        chart.priceLines.push(chart.candleSeries.createPriceLine({
           price: signal.entry_zone.min,
           color: entryColor,
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,
           title: "Entry Min",
-        });
-        candleSeries.createPriceLine({
+        }));
+        chart.priceLines.push(chart.candleSeries.createPriceLine({
           price: signal.entry_zone.max,
           color: entryColor,
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,
           title: "Entry Max",
-        });
+        }));
       }
       
       if (signal.stop_loss !== undefined && signal.stop_loss !== null) {
-        candleSeries.createPriceLine({
+        chart.priceLines.push(chart.candleSeries.createPriceLine({
           price: signal.stop_loss,
           color: "#ef4444",
           lineWidth: 2,
           lineStyle: 0,
           axisLabelVisible: true,
           title: "SL",
-        });
+        }));
       }
       
       if (Array.isArray(signal.take_profit)) {
         signal.take_profit.forEach((tp) => {
           if (tp && tp.price !== undefined) {
-            candleSeries.createPriceLine({
+            chart.priceLines.push(chart.candleSeries.createPriceLine({
               price: tp.price,
               color: "#22c55e",
               lineWidth: 1,
               lineStyle: 0,
               axisLabelVisible: true,
               title: `TP${tp.level}`,
-            });
+            }));
           }
         });
       }
     }
 
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
+  }, [lwcLoaded, lwcModule, chartData, signal]);
 
-    // Responsive
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
+  // Clean up on component unmount
+  useEffect(() => {
+    return () => {
+      if (chartRef.current) {
+        if (chartRef.current.cleanupResize) chartRef.current.cleanupResize();
+        chartRef.current.remove();
+        chartRef.current = null;
       }
     };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [lwcLoaded, lwcModule, chartData, signal]);
+  }, []);
 
   if (!chartData?.candles?.length) {
     return (
