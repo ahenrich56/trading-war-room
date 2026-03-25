@@ -51,7 +51,17 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
       wickUpColor: "#22c55e",
       wickDownColor: "#ef4444",
     });
-    const candleData = chartData.candles.map((c: any) => ({
+    const uniqueCandles: any[] = [];
+    const seenTimes = new Set();
+    const sortedCandles = [...chartData.candles].sort((a: any, b: any) => a.time - b.time);
+    for (const c of sortedCandles) {
+      if (!seenTimes.has(c.time)) {
+        seenTimes.add(c.time);
+        uniqueCandles.push(c);
+      }
+    }
+
+    const candleData = uniqueCandles.map((c: any) => ({
       time: c.time,
       open: c.open,
       high: c.high,
@@ -68,7 +78,7 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
-    const volData = chartData.candles.map((c: any) => ({
+    const volData = uniqueCandles.map((c: any) => ({
       time: c.time,
       value: c.volume,
       color: c.close >= c.open ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)",
@@ -97,40 +107,50 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
     if (signal && signal.signal !== "NO_TRADE") {
       const entryColor = signal.signal === "LONG" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
       
-      candleSeries.createPriceLine({
-        price: signal.entry_zone.min,
-        color: entryColor,
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "Entry Min",
-      });
-      candleSeries.createPriceLine({
-        price: signal.entry_zone.max,
-        color: entryColor,
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "Entry Max",
-      });
-      candleSeries.createPriceLine({
-        price: signal.stop_loss,
-        color: "#ef4444",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "SL",
-      });
-      signal.take_profit.forEach((tp) => {
+      if (signal.entry_zone && signal.entry_zone.min !== undefined && signal.entry_zone.max !== undefined) {
         candleSeries.createPriceLine({
-          price: tp.price,
-          color: "#22c55e",
+          price: signal.entry_zone.min,
+          color: entryColor,
           lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: "Entry Min",
+        });
+        candleSeries.createPriceLine({
+          price: signal.entry_zone.max,
+          color: entryColor,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: "Entry Max",
+        });
+      }
+      
+      if (signal.stop_loss !== undefined && signal.stop_loss !== null) {
+        candleSeries.createPriceLine({
+          price: signal.stop_loss,
+          color: "#ef4444",
+          lineWidth: 2,
           lineStyle: 0,
           axisLabelVisible: true,
-          title: `TP${tp.level}`,
+          title: "SL",
         });
-      });
+      }
+      
+      if (Array.isArray(signal.take_profit)) {
+        signal.take_profit.forEach((tp) => {
+          if (tp && tp.price !== undefined) {
+            candleSeries.createPriceLine({
+              price: tp.price,
+              color: "#22c55e",
+              lineWidth: 1,
+              lineStyle: 0,
+              axisLabelVisible: true,
+              title: `TP${tp.level}`,
+            });
+          }
+        });
+      }
     }
 
     chart.timeScale().fitContent();
