@@ -575,6 +575,17 @@ async def chart_data_endpoint(request: ChartRequest):
     ticker = request.ticker.upper()
     yf_symbol = resolve_ticker(ticker)
 
+    # ETF proxies for real-time data (futures have 10-15 min delay on free feeds)
+    REALTIME_MAP = {
+        "NQ=F": "QQQ", "NQ1!": "QQQ",
+        "ES=F": "SPY", "ES1!": "SPY",
+        "YM=F": "DIA", "YM1!": "DIA",
+        "GC=F": "GLD", "GC1!": "GLD",
+        "CL=F": "USO", "CL1!": "USO",
+        "RTY=F": "IWM", "RTY1!": "IWM",
+    }
+    chart_symbol = REALTIME_MAP.get(yf_symbol, yf_symbol)
+
     tf_map = {
         "1m": ("1m", "1d"), "2m": ("2m", "5d"), "5m": ("5m", "5d"),
         "15m": ("15m", "5d"), "1h": ("1h", "30d"), "4h": ("1h", "30d"),
@@ -582,8 +593,13 @@ async def chart_data_endpoint(request: ChartRequest):
     interval, period = tf_map.get(request.timeframe, ("5m", "5d"))
 
     try:
-        tk = yf.Ticker(yf_symbol)
+        tk = yf.Ticker(chart_symbol)
         df = tk.history(period=period, interval=interval)
+
+        # Fallback to original futures symbol if ETF proxy returns no data
+        if df.empty and chart_symbol != yf_symbol:
+            tk = yf.Ticker(yf_symbol)
+            df = tk.history(period=period, interval=interval)
 
         if df.empty:
             return {"error": "No data", "candles": [], "indicators": {}}
@@ -641,6 +657,8 @@ async def chart_data_endpoint(request: ChartRequest):
             } if of_data else {},
             "ticker": ticker,
             "symbol": yf_symbol,
+            "chart_source": chart_symbol if chart_symbol != yf_symbol else yf_symbol,
+            "timeframe": request.timeframe,
         }
 
     except Exception as e:
