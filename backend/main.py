@@ -842,6 +842,16 @@ EMA cross: {scan.get('ema_cross', 'N/A')}
 Volume ratio: {scan.get('vol_ratio', 'N/A')}x
 ATR: {scan.get('atr', 'N/A')}
 
+5-Factor Confluence Score: {scan.get('score', 0)}/100
+Strategy Direction: {scan.get('direction', 'NEUTRAL')}
+Signal Grade: {scan.get('grade', 'N/A')}
+Market Regime: {scan.get('regime', 'N/A')}
+Order Flow Bias: {scan.get('order_flow_bias', 'NEUTRAL')}
+
+IMPORTANT: The 5-factor confluence system has already scored this setup.
+If signal grade is F or C, or regime is LOW_LIQUIDITY, you should vote NO_TRADE.
+Your vote should be consistent with the strategy direction and grade above.
+
 Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['price']},"stop_loss":0,"take_profit":0,"reason":"string"}}
 """
 
@@ -875,6 +885,10 @@ Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['
         "verdicts": verdicts,
         "models_used": CONSENSUS_MODELS,
         "scanned_at": datetime.utcnow().isoformat() + "Z",
+        "regime": scan.get("regime", "N/A"),
+        "signal_grade": scan.get("grade", "N/A"),
+        "strategy_score": scan.get("score", 0),
+        "strategy_direction": scan.get("direction", "NEUTRAL"),
     }
 
 

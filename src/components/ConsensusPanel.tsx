@@ -45,6 +45,37 @@ export function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunni
         </div>
       </div>
 
+      {/* Scoring Context */}
+      {data.regime && (
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded bg-black/20 border border-white/5 text-[10px]">
+          <span className="text-slate-500">REGIME</span>
+          <span className={`px-1.5 py-0.5 rounded font-bold ${
+            data.regime === "LOW_LIQUIDITY" ? "bg-red-500/20 text-red-400" :
+            data.regime?.includes("TRENDING") ? "bg-cyan-500/20 text-cyan-400" :
+            data.regime === "HIGH_VOLATILITY" ? "bg-amber-500/20 text-amber-400" :
+            "bg-slate-500/20 text-slate-400"
+          }`}>{data.regime}</span>
+          <span className="text-slate-500">GRADE</span>
+          <span className={`px-1.5 py-0.5 rounded font-bold ${
+            data.signal_grade?.startsWith("A") ? "bg-green-500/20 text-green-400" :
+            data.signal_grade === "B" ? "bg-cyan-500/20 text-cyan-400" :
+            "bg-red-500/20 text-red-400"
+          }`}>{data.signal_grade}</span>
+          <span className="text-slate-500">SCORE</span>
+          <span className={`font-bold ${
+            (data.strategy_score ?? 0) > 20 ? "text-green-400" :
+            (data.strategy_score ?? 0) < -20 ? "text-red-400" :
+            "text-yellow-400"
+          }`}>{data.strategy_score}/100</span>
+          <span className="text-slate-500">DIR</span>
+          <span className={`font-bold ${
+            data.strategy_direction === "LONG" ? "text-green-400" :
+            data.strategy_direction === "SHORT" ? "text-red-400" :
+            "text-yellow-400"
+          }`}>{data.strategy_direction}</span>
+        </div>
+      )}
+
       {/* Individual Model Verdicts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {data.verdicts.map((v: any, i: number) => {
