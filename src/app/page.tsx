@@ -5,11 +5,9 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SignalPayload, OrderFlowData, MtfOrderFlowData } from "@/components/types";
+import { SignalPayload } from "@/components/types";
 import { MiniChart } from "@/components/MiniChart";
 import { ConsensusPanel } from "@/components/ConsensusPanel";
-import { ICTPanel } from "@/components/ICTPanel";
-import { OrderFlowPanel } from "@/components/OrderFlowPanel";
 import { SignalStrip } from "@/components/SignalStrip";
 import { AgentAccordion } from "@/components/AgentAccordion";
 import { TradeJournal } from "@/components/TradeJournal";
@@ -52,9 +50,7 @@ export default function WarRoomDashboard() {
   // Sidebar navigation
   const [activeView, setActiveView] = useState<"main" | "journal" | "consensus">("main");
 
-  // Detail panel toggles
-  const [showIct, setShowIct] = useState(false);
-  const [showOrderFlow, setShowOrderFlow] = useState(false);
+  // Detail panel toggle
   const [showAgents, setShowAgents] = useState(false);
 
   // Watchlist drawer
@@ -65,11 +61,6 @@ export default function WarRoomDashboard() {
   // Consensus
   const [consensusData, setConsensusData] = useState<any>(null);
   const [isConsensusRunning, setIsConsensusRunning] = useState(false);
-
-  // ICT + Order Flow
-  const [ictData, setIctData] = useState<any>(null);
-  const [orderFlowData, setOrderFlowData] = useState<OrderFlowData | null>(null);
-  const [mtfOrderFlowData, setMtfOrderFlowData] = useState<MtfOrderFlowData | null>(null);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -313,14 +304,10 @@ export default function WarRoomDashboard() {
 
                   if (marker === "SIGNAL_ENGINE") {
                     setSignal(content);
-                  } else if (marker === "ICT") {
-                    setIctData(content);
-                  } else if (marker === "ORDER_FLOW") {
-                    setOrderFlowData(content);
-                  } else if (marker === "MTF_ORDER_FLOW") {
-                    setMtfOrderFlowData(content);
                   } else if (marker === "ERROR") {
                     setError(content.text);
+                  } else if (marker === "ICT" || marker === "ORDER_FLOW" || marker === "MTF_ORDER_FLOW") {
+                    // Silently consumed — data feeds into signal scoring backend-side
                   } else {
                     setAgentData((prev) => ({ ...prev, [marker]: content.text }));
                   }
@@ -504,22 +491,6 @@ export default function WarRoomDashboard() {
               {/* Detail toggle chips */}
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => setShowIct(p => !p)}
-                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
-                    showIct ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
-                  }`}
-                >
-                  ICT {showIct ? "ON" : "OFF"}
-                </button>
-                <button
-                  onClick={() => setShowOrderFlow(p => !p)}
-                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
-                    showOrderFlow ? "text-violet-400 border-violet-500/40 bg-violet-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
-                  }`}
-                >
-                  ORDER FLOW {showOrderFlow ? "ON" : "OFF"}
-                </button>
-                <button
                   onClick={() => setShowAgents(p => !p)}
                   className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
                     showAgents ? "text-cyan-400 border-cyan-500/40 bg-cyan-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
@@ -529,12 +500,6 @@ export default function WarRoomDashboard() {
                 </button>
               </div>
 
-              {showIct && (
-                <ICTPanel data={ictData} isRunning={false} ticker={ticker} />
-              )}
-              {showOrderFlow && (
-                <OrderFlowPanel data={orderFlowData} ticker={ticker} mtfData={mtfOrderFlowData} />
-              )}
               {showAgents && (
                 <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
               )}
