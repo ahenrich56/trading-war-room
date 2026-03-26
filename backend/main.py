@@ -575,6 +575,18 @@ async def chart_data_endpoint(request: ChartRequest):
     ticker = request.ticker.upper()
     yf_symbol = resolve_ticker(ticker)
 
+    # ETF proxies for real-time data — futures have 10-15 min delay on free feeds
+    # We fetch ETF candles (real-time) then scale prices to match futures contract
+    REALTIME_PROXY = {
+        "NQ=F": "QQQ", "NQ1!": "QQQ",
+        "ES=F": "SPY", "ES1!": "SPY",
+        "YM=F": "DIA", "YM1!": "DIA",
+        "GC=F": "GLD", "GC1!": "GLD",
+        "CL=F": "USO", "CL1!": "USO",
+        "RTY=F": "IWM", "RTY1!": "IWM",
+    }
+    etf_symbol = REALTIME_PROXY.get(yf_symbol)
+
     tf_map = {
         "1m": ("1m", "1d"), "2m": ("2m", "5d"), "5m": ("5m", "5d"),
         "15m": ("15m", "5d"), "1h": ("1h", "30d"), "4h": ("1h", "30d"),
@@ -582,11 +594,48 @@ async def chart_data_endpoint(request: ChartRequest):
     interval, period = tf_map.get(request.timeframe, ("5m", "5d"))
 
     try:
-        tk = yf.Ticker(yf_symbol)
+        # Determine scale factor if using ETF proxy
+        scale = 1.0
+        chart_source = yf_symbol
+
+        if etf_symbol:
+            # Get delayed futures price as scale anchor
+            futures_tk = yf.Ticker(yf_symbol)
+            futures_info = futures_tk.history(period="1d", interval="1m")
+            if not futures_info.empty:
+                futures_price = float(futures_info["Close"].iloc[-1])
+
+                # Get ETF price for ratio
+                etf_tk = yf.Ticker(etf_symbol)
+                etf_info = etf_tk.history(period="1d", interval="1m")
+                if not etf_info.empty:
+                    etf_price = float(etf_info["Close"].iloc[-1])
+                    if etf_price > 0:
+                        scale = futures_price / etf_price
+                        chart_source = f"{etf_symbol}→{yf_symbol} (x{scale:.2f})"
+
+        # Fetch candles from ETF (real-time) or futures (delayed)
+        fetch_symbol = etf_symbol if etf_symbol and scale > 1.0 else yf_symbol
+        tk = yf.Ticker(fetch_symbol)
         df = tk.history(period=period, interval=interval)
 
         if df.empty:
+            # Fallback to futures symbol directly
+            if fetch_symbol != yf_symbol:
+                tk = yf.Ticker(yf_symbol)
+                df = tk.history(period=period, interval=interval)
+                scale = 1.0
+                chart_source = yf_symbol
+
+        if df.empty:
             return {"error": "No data", "candles": [], "indicators": {}}
+
+        # Apply scale factor to OHLC data
+        if scale != 1.0:
+            df["Open"] = df["Open"] * scale
+            df["High"] = df["High"] * scale
+            df["Low"] = df["Low"] * scale
+            df["Close"] = df["Close"] * scale
 
         # Build candles array for TradingView
         candles = []
@@ -600,7 +649,7 @@ async def chart_data_endpoint(request: ChartRequest):
                 "volume": int(row["Volume"]),
             })
 
-        # Compute indicator overlays
+        # Compute indicator overlays (already on scaled data)
         close = df["Close"]
         high = df["High"]
         low = df["Low"]
@@ -641,11 +690,13 @@ async def chart_data_endpoint(request: ChartRequest):
             } if of_data else {},
             "ticker": ticker,
             "symbol": yf_symbol,
-            "chart_source": yf_symbol,
+            "chart_source": chart_source,
             "timeframe": request.timeframe,
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"error": str(e), "candles": [], "indicators": {}}
 
 
