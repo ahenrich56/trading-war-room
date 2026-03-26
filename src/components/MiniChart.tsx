@@ -6,6 +6,8 @@ import { SignalPayload } from "./types";
 export function MiniChart({ chartData, signal, ticker }: { chartData: any, signal: SignalPayload | null, ticker: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
+  const prevTickerRef = useRef<string>("");
+  const prevTimeframeRef = useRef<string>("");
   const [lwcLoaded, setLwcLoaded] = useState(false);
   const [lwcModule, setLwcModule] = useState<any>(null);
 
@@ -108,7 +110,14 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
     if (chartData.indicators?.ema21?.length) chart.ema21Series.setData(chartData.indicators.ema21);
     if (chartData.indicators?.vwap?.length) chart.vwapSeries.setData(chartData.indicators.vwap);
 
-    chart.timeScale().scrollToRealTime();
+    // Only scroll to real time on initial load or ticker/timeframe change
+    // Respect user's scroll position during 10s polling updates
+    const currentTimeframe = chartData.timeframe || "";
+    if (prevTickerRef.current !== ticker || prevTimeframeRef.current !== currentTimeframe) {
+      chart.timeScale().scrollToRealTime();
+      prevTickerRef.current = ticker;
+      prevTimeframeRef.current = currentTimeframe;
+    }
 
     // Update signal lines
     if (chart.priceLines) {

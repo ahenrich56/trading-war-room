@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
+      cache: "no-store",
     });
 
     if (!response.ok) {
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload,
+        cache: "no-store",
       });
     }
 
