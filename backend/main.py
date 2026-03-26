@@ -198,12 +198,11 @@ async def generate_analysis_stream(req: AnalysisRequest):
     try:
         # ── 0. Fetch ALL data concurrently ──
         loop = asyncio.get_event_loop()
-        mtf_data, market_context, econ_calendar, whale_alerts, backtest_data = await asyncio.gather(
+        mtf_data, market_context, econ_calendar, whale_alerts = await asyncio.gather(
             loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf),
             loop.run_in_executor(executor, fetch_market_context),
             loop.run_in_executor(executor, get_economic_calendar),
             loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker),
-            loop.run_in_executor(executor, run_backtest, ticker, tf, 5),
         )
 
         mtf_summary = build_mtf_summary(mtf_data, ticker)
@@ -234,7 +233,6 @@ async def generate_analysis_stream(req: AnalysisRequest):
         yield emit("ICT", {"ticker": ticker, "timeframe": tf, "ict": ict_data})
         yield emit("ORDER_FLOW", order_flow_data)
         yield emit("MTF_ORDER_FLOW", mtf_of)
-        yield emit("BACKTEST", backtest_data)
 
         # ── Calculate Enhanced Strategy Score (5-Factor Confluence) ──
         enhanced = calculate_enhanced_score(primary, ict_data, order_flow_data, mtf_confluence=mtf_of)

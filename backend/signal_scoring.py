@@ -183,47 +183,49 @@ def _score_structure(ict_data, current_price):
         return 0, ["No ICT data available"]
 
     # BOS / CHoCH direction
-    structure = ict_data.get("structure", [])
-    if structure:
-        recent = structure[-1] if structure else {}
+    structure_events = ict_data.get("structure_events", [])
+    if structure_events:
+        recent = structure_events[-1]
         stype = recent.get("type", "")
-        if "bullish" in stype.lower():
+        sdir = recent.get("direction", "")
+        label = f"{sdir} {stype}" if sdir else stype
+        if "bullish" in sdir.lower() or "bullish" in stype.lower():
             score += 30
-            signals.append(f"Bullish {stype}")
-        elif "bearish" in stype.lower():
+            signals.append(f"Bullish {label}")
+        elif "bearish" in sdir.lower() or "bearish" in stype.lower():
             score -= 30
-            signals.append(f"Bearish {stype}")
+            signals.append(f"Bearish {label}")
 
-    # Order block proximity
+    # Order block proximity (ICT returns top/bottom, not high/low)
     order_blocks = ict_data.get("order_blocks", [])
     for ob in order_blocks[-3:]:
-        ob_high = ob.get("high", 0)
-        ob_low = ob.get("low", 0)
+        ob_top = ob.get("top", 0)
+        ob_bottom = ob.get("bottom", 0)
         ob_type = ob.get("type", "")
 
-        if ob_low <= current_price <= ob_high:
+        if ob_bottom <= current_price <= ob_top:
             if "bullish" in ob_type.lower():
                 score += 25
-                signals.append(f"Price at bullish OB ({ob_low:.2f}-{ob_high:.2f})")
+                signals.append(f"Price at bullish OB ({ob_bottom:.2f}-{ob_top:.2f})")
             elif "bearish" in ob_type.lower():
                 score -= 25
-                signals.append(f"Price at bearish OB ({ob_low:.2f}-{ob_high:.2f})")
+                signals.append(f"Price at bearish OB ({ob_bottom:.2f}-{ob_top:.2f})")
             break
 
-    # FVG alignment
-    fvgs = ict_data.get("fvgs", [])
-    for fvg in fvgs[-3:]:
-        fvg_high = fvg.get("high", 0)
-        fvg_low = fvg.get("low", 0)
+    # FVG alignment (ICT returns fair_value_gaps with top/bottom)
+    fair_value_gaps = ict_data.get("fair_value_gaps", [])
+    for fvg in fair_value_gaps[-3:]:
+        fvg_top = fvg.get("top", 0)
+        fvg_bottom = fvg.get("bottom", 0)
         fvg_type = fvg.get("type", "")
 
-        if fvg_low <= current_price <= fvg_high:
+        if fvg_bottom <= current_price <= fvg_top:
             if "bullish" in fvg_type.lower():
                 score += 15
-                signals.append(f"Price filling bullish FVG")
+                signals.append("Price filling bullish FVG")
             elif "bearish" in fvg_type.lower():
                 score -= 15
-                signals.append(f"Price filling bearish FVG")
+                signals.append("Price filling bearish FVG")
             break
 
     return max(-100, min(100, score)), signals
