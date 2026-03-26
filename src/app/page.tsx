@@ -441,8 +441,10 @@ export default function WarRoomDashboard() {
             <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
           )}
 
-          {/* ═══ AGENTS — always visible ═══ */}
-          <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
+          {/* ═══ AGENTS — main view only ═══ */}
+          {activeView === "main" && (
+            <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
+          )}
         </main>
 
         {/* Toast Notifications */}
