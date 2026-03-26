@@ -12,9 +12,6 @@ import { SignalStrip } from "@/components/SignalStrip";
 import { AgentAccordion } from "@/components/AgentAccordion";
 import { TradeJournal } from "@/components/TradeJournal";
 import { WatchlistDrawer } from "@/components/WatchlistDrawer";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { TermTooltip } from "@/components/TermTooltip";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu } from "lucide-react";
 
 const ALL_STAGES = [
@@ -38,7 +35,6 @@ export default function WarRoomDashboard() {
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [backendStatus, setBackendStatus] = useState<"ok" | "error" | "checking">("checking");
-  const [demoMode, setDemoMode] = useState(false);
 
   const [agentData, setAgentData] = useState<Record<string, any>>({});
   const [signal, setSignal] = useState<SignalPayload | null>(null);
@@ -50,8 +46,7 @@ export default function WarRoomDashboard() {
   // Sidebar navigation
   const [activeView, setActiveView] = useState<"main" | "journal" | "consensus">("main");
 
-  // Detail panel toggle
-  const [showAgents, setShowAgents] = useState(false);
+  // Agents always visible
 
   // Watchlist drawer
   const [watchlistOpen, setWatchlistOpen] = useState(false);
@@ -165,62 +160,6 @@ export default function WarRoomDashboard() {
     }
   }, [timeframe, watchlistTickers, addToast]);
 
-  // Demo mode mock pipeline
-  const runDemoPipeline = useCallback(async () => {
-    setIsRunning(true);
-    setError(null);
-    setAgentData({});
-    setSignal(null);
-    setActiveView("main");
-
-    try {
-      const mockChartUrl = "https://raw.githubusercontent.com/tradingview/lightweight-charts/master/plugin-examples/data.json";
-      const res = await fetch(mockChartUrl);
-      const rawData = await res.json();
-      const cData = {
-        ohlcv: rawData.slice(-100).map((d: any) => ({
-          time: new Date(d.time).getTime() / 1000,
-          open: d.open, high: d.high, low: d.low, close: d.close,
-          volume: Math.random() * 1000 + 500
-        }))
-      };
-      setChartData(cData);
-
-      const stages = [...ALL_STAGES];
-      setProgress(0);
-
-      const mockAgents: Record<string, string> = {};
-      for (let i = 0; i < stages.length; i++) {
-        const stage = stages[i];
-        setCurrentStage(stage);
-        await new Promise(r => setTimeout(r, 600));
-        mockAgents[stage] = `[DEMO MODE] The ${stage} indicates favorable conditions for a long entry in the current market regime based on simulated metrics.`;
-        setAgentData({ ...mockAgents });
-        setProgress(Math.round(((i + 1) / stages.length) * 100));
-      }
-
-      const lastClose = cData.ohlcv[cData.ohlcv.length - 1].close;
-      setSignal({
-        ticker, timeframe, signal: "LONG",
-        entry_zone: { min: lastClose - 2, max: lastClose + 1 },
-        stop_loss: lastClose - 5,
-        take_profit: [{ level: 1, price: lastClose + 10 }],
-        confidence: 85, risk_reward: 2.0, position_size_pct: 2,
-        reasons: ["Strong demo momentum", "Simulated breakout"],
-        tv_alert: "DEMO_ALERT",
-        timestamp_utc: new Date().toISOString()
-      });
-
-      addToast("Demo analysis complete", "success");
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setIsRunning(false);
-      setProgress(100);
-      setCurrentStage("COMPLETE");
-    }
-  }, [ticker, timeframe, addToast]);
-
   // Multi-model consensus
   const runConsensus = useCallback(async () => {
     setIsConsensusRunning(true);
@@ -254,8 +193,6 @@ export default function WarRoomDashboard() {
 
   // Main analysis SSE stream
   const runAnalysis = async () => {
-    if (demoMode) { runDemoPipeline(); return; }
-
     setIsRunning(true);
     setAgentData({});
     setSignal(null);
@@ -409,12 +346,6 @@ export default function WarRoomDashboard() {
             </button>
 
             <div className={`${isMobileMenuOpen ? "flex" : "hidden"} sm:flex flex-col sm:flex-row gap-2 items-stretch sm:items-center absolute sm:relative top-full left-0 right-0 sm:top-auto bg-[#05050A] sm:bg-transparent p-3 sm:p-0 border-b sm:border-0 border-white/5 z-50`}>
-              <div className="flex items-center space-x-1.5 bg-slate-900 border border-white/10 px-2 py-1 rounded">
-                <Switch id="demo-mode" checked={demoMode} onCheckedChange={setDemoMode} />
-                <Label htmlFor="demo-mode" className="text-[10px] text-slate-300 font-bold cursor-pointer">
-                  <TermTooltip term="Demo" description="Simulated offline data for testing.">DEMO</TermTooltip>
-                </Label>
-              </div>
               <Input
                 value={ticker}
                 onChange={e => setTicker(e.target.value.toUpperCase())}
@@ -488,21 +419,7 @@ export default function WarRoomDashboard() {
 
               {signal && <SignalStrip signal={signal} />}
 
-              {/* Detail toggle chips */}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setShowAgents(p => !p)}
-                  className={`px-3 py-1.5 text-[10px] font-bold tracking-widest rounded border transition-all ${
-                    showAgents ? "text-cyan-400 border-cyan-500/40 bg-cyan-500/10" : "text-slate-500 border-white/10 hover:text-slate-300 hover:border-white/20"
-                  }`}
-                >
-                  AGENTS {showAgents ? "ON" : "OFF"}
-                </button>
-              </div>
-
-              {showAgents && (
-                <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
-              )}
+              <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
             </>
           )}
 
