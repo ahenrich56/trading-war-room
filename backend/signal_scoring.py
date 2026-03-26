@@ -263,10 +263,10 @@ def _score_order_flow(order_flow_summary):
     divergences = order_flow_summary.get("divergences", [])
     for div in divergences[-2:]:
         if div.get("type") == "BEARISH_DIVERGENCE":
-            score -= 20
+            score -= 35
             signals.append(f"BEARISH CVD divergence at {div.get('price_level', '?')}")
         elif div.get("type") == "BULLISH_DIVERGENCE":
-            score += 20
+            score += 35
             signals.append(f"BULLISH CVD divergence at {div.get('price_level', '?')}")
 
     # Absorption zones
@@ -282,12 +282,12 @@ def _score_order_flow(order_flow_summary):
     # VWAP deviation (mean-reversion risk)
     vwap_dev = summary.get("vwap_deviation", 0)
     if abs(vwap_dev) > 2:
-        # Extended — contra-signal for continued direction
+        # Extended — strong contra-signal for continued direction
         if vwap_dev > 2:
-            score -= 10
+            score -= 30
             signals.append(f"Extended above VWAP ({vwap_dev}σ) — mean reversion risk")
         elif vwap_dev < -2:
-            score += 10
+            score += 30
             signals.append(f"Extended below VWAP ({vwap_dev}σ) — bounce potential")
 
     return max(-100, min(100, score)), signals
@@ -336,6 +336,26 @@ def _determine_direction(weighted_score):
     elif weighted_score < -20:
         return "SHORT"
     return "NO_TRADE"
+
+
+def _apply_hard_gates(adx, volume_ratio, atr, direction):
+    """
+    Hard gates that force NO_TRADE regardless of score.
+    Returns (should_block: bool, reason: str).
+    """
+    if direction == "NO_TRADE":
+        return False, ""
+
+    if atr is None or atr == 0:
+        return True, "ATR unavailable — cannot size stops"
+
+    if adx is not None and adx < 15:
+        return True, f"ADX={adx:.1f} < 15 — no tradeable trend"
+
+    if volume_ratio is not None and volume_ratio < 0.3:
+        return True, f"Volume ratio={volume_ratio:.1f}x < 0.3 — insufficient liquidity"
+
+    return False, ""
 
 
 def _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence):
@@ -445,6 +465,14 @@ def calculate_enhanced_score(
 
     direction = _determine_direction(weighted_score)
 
+    # Hard gates — force NO_TRADE on insufficient data quality
+    blocked, gate_reason = _apply_hard_gates(adx, volume_ratio, atr, direction)
+    if blocked:
+        direction = "NO_TRADE"
+        all_signals_extra = [f"BLOCKED: {gate_reason}"]
+    else:
+        all_signals_extra = []
+
     if direction == "LONG":
         factors_aligned = sum(1 for s in factor_scores.values() if s > 10)
     elif direction == "SHORT":
@@ -472,8 +500,8 @@ def calculate_enhanced_score(
     # 6. Grade signal
     grade = _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence)
 
-    # Downgrade direction on F grade
-    if grade == "F":
+    # Downgrade direction on F or C grade
+    if grade in ("F", "C"):
         direction = "NO_TRADE"
 
     # 7. Build confluences list for frontend
@@ -495,13 +523,16 @@ def calculate_enhanced_score(
         })
 
     # Combine all signals
-    all_signals = trend_signals + momentum_signals + structure_signals + of_signals + vol_signals
+    all_signals = trend_signals + momentum_signals + structure_signals + of_signals + vol_signals + all_signals_extra
 
     # Add MTF confluence signal if relevant
     if mtf_multiplier != 1.0:
         all_signals.append(f"MTF Order Flow: {mtf_label} ({mtf_multiplier}x multiplier)")
 
     final_score = max(-100, min(100, int(weighted_score)))
+
+    # Compute structure-aware SL/TP levels
+    structure_levels = compute_structure_levels(ict_data, current_price, direction, atr)
 
     return {
         "score": final_score,
@@ -515,4 +546,141 @@ def calculate_enhanced_score(
         "factor_scores": factor_scores,
         "mtf_confluence_multiplier": mtf_multiplier,
         "mtf_confluence_label": mtf_label,
+        "structure_levels": structure_levels,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+#  STRUCTURE-AWARE SL/TP COMPUTATION
+# ═══════════════════════════════════════════════════════════
+
+def compute_structure_levels(ict_data, current_price, direction, atr):
+    """
+    Compute SL and TP levels based on ICT structure (order blocks, FVGs, swing points).
+
+    For LONG: SL below nearest bullish support structure
+    For SHORT: SL above nearest bearish resistance structure
+    Falls back to ATR-based levels if no structure found.
+    """
+    result = {
+        "suggested_sl": None,
+        "suggested_tp1": None,
+        "suggested_tp2": None,
+        "sl_reference": "none",
+        "fallback_used": True,
+    }
+
+    if not current_price or not atr or direction == "NO_TRADE":
+        return result
+
+    cp = float(current_price)
+    atr_val = float(atr)
+    buffer = 0.25 * atr_val
+
+    if not ict_data:
+        # Pure ATR fallback
+        if direction == "LONG":
+            result["suggested_sl"] = round(cp - 1.5 * atr_val, 2)
+            result["suggested_tp1"] = round(cp + 2.0 * atr_val, 2)
+            result["suggested_tp2"] = round(cp + 3.0 * atr_val, 2)
+        elif direction == "SHORT":
+            result["suggested_sl"] = round(cp + 1.5 * atr_val, 2)
+            result["suggested_tp1"] = round(cp - 2.0 * atr_val, 2)
+            result["suggested_tp2"] = round(cp - 3.0 * atr_val, 2)
+        result["sl_reference"] = "ATR fallback (no ICT data)"
+        return result
+
+    order_blocks = ict_data.get("order_blocks", [])
+    fair_value_gaps = ict_data.get("fair_value_gaps", [])
+    swing_highs = [s.get("price", 0) for s in ict_data.get("recent_swing_highs", [])]
+    swing_lows = [s.get("price", 0) for s in ict_data.get("recent_swing_lows", [])]
+
+    if direction == "LONG":
+        # SL: find nearest support below price (bullish OB bottom, bullish FVG bottom, swing low)
+        support_levels = []
+        for ob in order_blocks:
+            if "bullish" in ob.get("type", "").lower() and ob.get("bottom", 0) < cp:
+                support_levels.append(("OB", ob["bottom"]))
+        for fvg in fair_value_gaps:
+            if "bullish" in fvg.get("type", "").lower() and fvg.get("bottom", 0) < cp:
+                support_levels.append(("FVG", fvg["bottom"]))
+        for sl_price in swing_lows:
+            if 0 < sl_price < cp:
+                support_levels.append(("Swing Low", sl_price))
+
+        if support_levels:
+            # Use nearest support below price
+            support_levels.sort(key=lambda x: x[1], reverse=True)
+            ref_type, ref_price = support_levels[0]
+            result["suggested_sl"] = round(ref_price - buffer, 2)
+            result["sl_reference"] = f"{ref_type} at {ref_price:.2f}"
+            result["fallback_used"] = False
+        else:
+            result["suggested_sl"] = round(cp - 1.5 * atr_val, 2)
+            result["sl_reference"] = "ATR fallback (no support structure)"
+
+        # TP: nearest resistance above price
+        resistance_levels = []
+        for ob in order_blocks:
+            if "bearish" in ob.get("type", "").lower() and ob.get("top", 0) > cp:
+                resistance_levels.append(ob["top"])
+        for sh_price in swing_highs:
+            if sh_price > cp:
+                resistance_levels.append(sh_price)
+        resistance_levels.sort()
+
+        if len(resistance_levels) >= 2:
+            result["suggested_tp1"] = round(resistance_levels[0], 2)
+            result["suggested_tp2"] = round(resistance_levels[1], 2)
+        elif len(resistance_levels) == 1:
+            result["suggested_tp1"] = round(resistance_levels[0], 2)
+            result["suggested_tp2"] = round(cp + 3.0 * atr_val, 2)
+        else:
+            result["suggested_tp1"] = round(cp + 2.0 * atr_val, 2)
+            result["suggested_tp2"] = round(cp + 3.0 * atr_val, 2)
+
+    elif direction == "SHORT":
+        # SL: find nearest resistance above price (bearish OB top, bearish FVG top, swing high)
+        resistance_levels = []
+        for ob in order_blocks:
+            if "bearish" in ob.get("type", "").lower() and ob.get("top", 0) > cp:
+                resistance_levels.append(("OB", ob["top"]))
+        for fvg in fair_value_gaps:
+            if "bearish" in fvg.get("type", "").lower() and fvg.get("top", 0) > cp:
+                resistance_levels.append(("FVG", fvg["top"]))
+        for sh_price in swing_highs:
+            if sh_price > cp:
+                resistance_levels.append(("Swing High", sh_price))
+
+        if resistance_levels:
+            # Use nearest resistance above price
+            resistance_levels.sort(key=lambda x: x[1])
+            ref_type, ref_price = resistance_levels[0]
+            result["suggested_sl"] = round(ref_price + buffer, 2)
+            result["sl_reference"] = f"{ref_type} at {ref_price:.2f}"
+            result["fallback_used"] = False
+        else:
+            result["suggested_sl"] = round(cp + 1.5 * atr_val, 2)
+            result["sl_reference"] = "ATR fallback (no resistance structure)"
+
+        # TP: nearest support below price
+        support_levels = []
+        for ob in order_blocks:
+            if "bullish" in ob.get("type", "").lower() and ob.get("bottom", 0) < cp:
+                support_levels.append(ob["bottom"])
+        for sl_price in swing_lows:
+            if 0 < sl_price < cp:
+                support_levels.append(sl_price)
+        support_levels.sort(reverse=True)
+
+        if len(support_levels) >= 2:
+            result["suggested_tp1"] = round(support_levels[0], 2)
+            result["suggested_tp2"] = round(support_levels[1], 2)
+        elif len(support_levels) == 1:
+            result["suggested_tp1"] = round(support_levels[0], 2)
+            result["suggested_tp2"] = round(cp - 3.0 * atr_val, 2)
+        else:
+            result["suggested_tp1"] = round(cp - 2.0 * atr_val, 2)
+            result["suggested_tp2"] = round(cp - 3.0 * atr_val, 2)
+
+    return result

@@ -408,14 +408,12 @@ export default function WarRoomDashboard() {
         {/* Main scrollable content */}
         <main className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
 
-          {/* ═══ MAIN VIEW: Chart + Signal + Detail Toggles ═══ */}
+          {/* ═══ MAIN VIEW: Chart + Signal ═══ */}
           {activeView === "main" && (
             <>
               <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
 
               {signal && <SignalStrip signal={signal} />}
-
-              <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
             </>
           )}
 
@@ -442,6 +440,9 @@ export default function WarRoomDashboard() {
           {activeView === "consensus" && (
             <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
           )}
+
+          {/* ═══ AGENTS — always visible ═══ */}
+          <AgentAccordion agentData={agentData} currentStage={isRunning ? currentStage : null} />
         </main>
 
         {/* Toast Notifications */}

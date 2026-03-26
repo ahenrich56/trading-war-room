@@ -184,6 +184,66 @@ async def send_telegram_alert(signal_data: dict):
 
 
 # ═══════════════════════════════════════════════════════════
+#  POST-AI SIGNAL VALIDATION
+# ═══════════════════════════════════════════════════════════
+
+def _validate_signal(signal_data, signal_grade, structure_levels, atr_val):
+    """
+    Post-AI safety net. Override signal to NO_TRADE if quality checks fail.
+    This catches cases where the AI ignores prompt rules.
+    """
+    signal = signal_data.get("signal", "NO_TRADE")
+    if signal not in ("LONG", "SHORT"):
+        return signal_data
+
+    overrides = []
+    confidence = signal_data.get("confidence", 0)
+    rr = signal_data.get("risk_reward", 0)
+
+    # Gate 1: Minimum confidence
+    if confidence < 25:
+        overrides.append(f"Confidence {confidence}% < 25% minimum")
+
+    # Gate 2: Minimum R:R
+    if rr < 1.5:
+        overrides.append(f"R:R {rr} < 1.5 minimum")
+
+    # Gate 3: Grade enforcement (defense-in-depth)
+    if signal_grade in ("C", "F"):
+        overrides.append(f"Grade {signal_grade} requires NO_TRADE")
+
+    # Gate 4: SL sanity check
+    sl = signal_data.get("stop_loss", 0)
+    entry_zone = signal_data.get("entry_zone", {})
+    entry_mid = (entry_zone.get("min", 0) + entry_zone.get("max", 0)) / 2
+    if sl and entry_mid and atr_val:
+        sl_distance = abs(entry_mid - sl)
+        if sl_distance > 3 * atr_val:
+            overrides.append(f"SL distance {sl_distance:.1f} > 3x ATR ({3*atr_val:.1f})")
+        if sl_distance < 0.3 * atr_val:
+            overrides.append(f"SL distance {sl_distance:.1f} < 0.3x ATR ({0.3*atr_val:.1f})")
+
+    # Gate 5: Validate SL against structure
+    if structure_levels and not structure_levels.get("fallback_used"):
+        suggested_sl = structure_levels.get("suggested_sl", 0)
+        if suggested_sl and sl:
+            if signal == "LONG" and sl > suggested_sl:
+                overrides.append(f"SL {sl} above structure support {suggested_sl}")
+            elif signal == "SHORT" and sl < suggested_sl:
+                overrides.append(f"SL {sl} below structure resistance {suggested_sl}")
+
+    if overrides:
+        signal_data["signal"] = "NO_TRADE"
+        signal_data["validation_overrides"] = overrides
+        signal_data["original_signal"] = signal
+        reasons = signal_data.get("reasons", [])
+        reasons.append(f"OVERRIDDEN: {'; '.join(overrides)}")
+        signal_data["reasons"] = reasons
+
+    return signal_data
+
+
+# ═══════════════════════════════════════════════════════════
 #  MAIN ANALYSIS STREAM
 # ═══════════════════════════════════════════════════════════
 
@@ -320,12 +380,27 @@ async def generate_analysis_stream(req: AnalysisRequest):
         atr_num = float(atr_val) if atr_val and atr_val != "N/A" else (float(current_price) * 0.005 if isinstance(current_price, (int, float)) else 50)
         cp = float(current_price) if isinstance(current_price, (int, float)) else 0
 
+        # Get structure-aware SL/TP levels
+        structure_levels = enhanced.get("structure_levels", {})
+        suggested_sl = structure_levels.get("suggested_sl", "N/A")
+        suggested_tp1 = structure_levels.get("suggested_tp1", "N/A")
+        suggested_tp2 = structure_levels.get("suggested_tp2", "N/A")
+        sl_reference = structure_levels.get("sl_reference", "none")
+
+        # Format ICT structure for prompt
+        ict_obs_text = ""
+        for ob in ict_data.get("order_blocks", [])[-4:]:
+            ict_obs_text += f"  {ob.get('type','?')} OB: {ob.get('bottom',0):.2f}-{ob.get('top',0):.2f} (strength: {ob.get('strength','?')})\n"
+        ict_fvgs_text = ""
+        for fvg in ict_data.get("fair_value_gaps", [])[-4:]:
+            ict_fvgs_text += f"  {fvg.get('type','?')} FVG: {fvg.get('bottom',0):.2f}-{fvg.get('top',0):.2f} (strength: {fvg.get('strength','?')})\n"
+
         json_prompt = f"""
 Based on all context for {ticker} on {tf}, risk profile '{risk}':
 
 CRITICAL PRICE DATA:
 - Current price: {current_price}
-- ATR(14): {atr_val} (use 1-2x ATR for stop distance)
+- ATR(14): {atr_val}
 - RSI(14): {primary.get('RSI_14', 'N/A')}
 - MACD histogram: {primary.get('MACD_histogram', 'N/A')}
 - EMA 9/21 cross: {primary.get('EMA_9_21_cross', 'N/A')}
@@ -344,6 +419,15 @@ ORDER FLOW DATA:
 - Absorptions: {len(order_flow_data.get('absorptions', []))}
 - VWAP Deviation: {order_flow_data.get('summary', {}).get('vwap_deviation', 0)}σ
 
+ICT STRUCTURE LEVELS (use these for SL/TP placement):
+- Order Blocks:
+{ict_obs_text if ict_obs_text else '  None detected'}
+- Fair Value Gaps:
+{ict_fvgs_text if ict_fvgs_text else '  None detected'}
+- Suggested SL (structure-based): {suggested_sl} (ref: {sl_reference})
+- Suggested TP1: {suggested_tp1}
+- Suggested TP2: {suggested_tp2}
+
 ENHANCED STRATEGY SCORING (5-Factor Confluence):
 - Strategy Direction: {strat_dir}
 - Strategy Score: {strat_score} (-100 to +100)
@@ -358,9 +442,11 @@ RULES:
 - IF SIGNAL GRADE IS 'F' OR 'C', USE 'NO_TRADE'.
 - IF THE RISK IS TOO HIGH OR CONTEXT IS BAD, YOU MAY DOWNGRADE TO 'NO_TRADE'.
 - YOU MAY NEVER CALL A 'LONG' IF THE STRATEGY IS 'SHORT', OR VICE VERSA.
+- Confidence MUST be >= 25 for any trade signal (LONG/SHORT). If unsure, use NO_TRADE.
+- R:R (risk_reward) MUST be >= 1.5 for any trade signal.
+- SL MUST be placed beyond the nearest ICT structure level (order block or FVG). Use the suggested SL above.
 - Entry: within 0.5x ATR of {current_price}
-- SL: 1-2x ATR from entry
-- TP1: 1.5-2x ATR, TP2: 2.5-3x ATR
+- TP1/TP2: Use suggested TP levels above, or nearest structural targets
 
 Output ONLY valid JSON, no markdown:
 {{
@@ -409,6 +495,9 @@ Output ONLY valid JSON, no markdown:
                 "tv_alert": f"TICKER={ticker};TF={tf};SIG=NO_TRADE;CONF=0;"
             }
 
+        # ── Post-AI Signal Validation ──
+        signal_data = _validate_signal(signal_data, signal_grade, structure_levels, atr_num)
+
         # Inject enhanced scoring metadata into signal
         signal_data["signal_grade"] = signal_grade
         signal_data["market_regime"] = market_regime
@@ -418,6 +507,7 @@ Output ONLY valid JSON, no markdown:
         signal_data["order_flow_bias"] = order_flow_data.get("summary", {}).get("overall_delta_bias", "NEUTRAL") if order_flow_data else "NEUTRAL"
         signal_data["mtf_confluence_label"] = enhanced.get("mtf_confluence_label", "NEUTRAL")
         signal_data["mtf_confluence_multiplier"] = enhanced.get("mtf_confluence_multiplier", 1.0)
+        signal_data["structure_levels"] = structure_levels
 
         # Store signal in history and send Telegram alert
         await store_signal(signal_data)
