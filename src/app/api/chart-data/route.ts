@@ -6,12 +6,22 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const FASTAPI_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+    const payload = JSON.stringify(body);
 
-    const response = await fetch(`${FASTAPI_URL}/api/v1/chart-data-full`, {
+    // Try full endpoint first (volume + EMA/VWAP indicators), fall back to basic
+    let response = await fetch(`${FASTAPI_URL}/api/v1/chart-data-full`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: payload,
     });
+
+    if (!response.ok) {
+      response = await fetch(`${FASTAPI_URL}/api/v1/chart-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      });
+    }
 
     const data = await response.json();
     return new Response(JSON.stringify(data), {
