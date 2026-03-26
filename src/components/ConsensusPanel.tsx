@@ -7,7 +7,7 @@ export function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunni
         <div className="text-center">
           <div className="text-3xl mb-2 animate-pulse">🗳️</div>
           <div className="text-sm">Querying 3 AI models on <span className="text-white font-bold">{ticker}</span>...</div>
-          <div className="text-[10px] mt-2 text-slate-600">GPT-4o-mini • Claude 3.5 Haiku • Gemini 2.0 Flash</div>
+          <div className="text-[10px] mt-2 text-slate-600">GPT-4o-mini • Claude 3.5 Haiku • Gemini 2.5 Flash</div>
         </div>
       </div>
     );
@@ -55,7 +55,7 @@ export function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunni
             <div key={i} className={`p-3 rounded border ${sigColor}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-slate-500 font-bold">
-                  {v.model === "gpt-4o-mini" ? "🤖 GPT-4o" :
+                  {v.model?.includes("gpt") ? "🤖 GPT-4o" :
                    v.model?.includes("claude") ? "🟣 Claude" :
                    v.model?.includes("gemini") ? "💎 Gemini" : v.model}
                 </span>

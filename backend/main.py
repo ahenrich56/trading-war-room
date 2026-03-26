@@ -789,9 +789,9 @@ async def watchlist_scan(request: WatchlistRequest):
 # ═══════════════════════════════════════════════════════════
 
 CONSENSUS_MODELS = [
-    "gpt-4o-mini",
-    "claude-3-5-haiku-20241022",
-    "gemini-2.0-flash",
+    "openai/gpt-4o-mini",
+    "anthropic/claude-3.5-haiku",
+    "google/gemini-2.5-flash",
 ]
 
 async def ask_model(model: str, prompt: str) -> dict:
