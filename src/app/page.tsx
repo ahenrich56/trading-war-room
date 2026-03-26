@@ -11,7 +11,7 @@ import { ConsensusPanel } from "@/components/ConsensusPanel";
 import { SignalStrip } from "@/components/SignalStrip";
 import { AgentAccordion } from "@/components/AgentAccordion";
 import { TradeJournal } from "@/components/TradeJournal";
-import { WatchlistDrawer } from "@/components/WatchlistDrawer";
+import { WatchlistPage } from "@/components/WatchlistPage";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu } from "lucide-react";
 
 const ALL_STAGES = [
@@ -44,12 +44,8 @@ export default function WarRoomDashboard() {
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
 
   // Sidebar navigation
-  const [activeView, setActiveView] = useState<"main" | "journal" | "consensus">("main");
+  const [activeView, setActiveView] = useState<"main" | "watchlist" | "journal" | "consensus">("main");
 
-  // Agents always visible
-
-  // Watchlist drawer
-  const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [watchlistData, setWatchlistData] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
 
@@ -290,9 +286,9 @@ export default function WarRoomDashboard() {
             <LayoutDashboard className="h-5 w-5" />
           </button>
           <button
-            onClick={() => setWatchlistOpen(true)}
+            onClick={() => setActiveView("watchlist")}
             title="Watchlist"
-            className={`p-2.5 rounded-xl transition-all ${watchlistOpen ? "bg-purple-500/10 text-purple-400" : "text-[#4A4A6A] hover:text-white"}`}
+            className={`p-2.5 rounded-xl transition-all ${activeView === "watchlist" ? "bg-purple-500/10 text-purple-400" : "text-[#4A4A6A] hover:text-white"}`}
           >
             <List className="h-5 w-5" />
           </button>
@@ -423,6 +419,20 @@ export default function WarRoomDashboard() {
             </>
           )}
 
+          {/* ═══ WATCHLIST ═══ */}
+          {activeView === "watchlist" && (
+            <WatchlistPage
+              watchlistTickers={watchlistTickers}
+              setWatchlistTickers={setWatchlistTickers}
+              watchlistData={watchlistData}
+              isScanning={isScanning}
+              onScan={scanWatchlist}
+              onSelect={(t: string) => { setTicker(t); setActiveView("main"); loadChartData(t, timeframe); }}
+              newTicker={newWatchlistTicker}
+              setNewTicker={setNewWatchlistTicker}
+            />
+          )}
+
           {/* ═══ TRADE JOURNAL ═══ */}
           {activeView === "journal" && (
             <TradeJournal signal={signal} signalHistory={signalHistory} />
@@ -453,19 +463,6 @@ export default function WarRoomDashboard() {
         )}
       </div>
 
-      {/* Watchlist Drawer */}
-      <WatchlistDrawer
-        isOpen={watchlistOpen}
-        onClose={() => setWatchlistOpen(false)}
-        watchlistTickers={watchlistTickers}
-        setWatchlistTickers={setWatchlistTickers}
-        watchlistData={watchlistData}
-        isScanning={isScanning}
-        onScan={scanWatchlist}
-        onSelect={(t) => { setTicker(t); setActiveView("main"); loadChartData(t, timeframe); }}
-        newTicker={newWatchlistTicker}
-        setNewTicker={setNewWatchlistTicker}
-      />
     </div>
   );
 }
