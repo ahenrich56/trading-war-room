@@ -108,6 +108,8 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
     if (chartData.indicators?.ema21?.length) chart.ema21Series.setData(chartData.indicators.ema21);
     if (chartData.indicators?.vwap?.length) chart.vwapSeries.setData(chartData.indicators.vwap);
 
+    chart.timeScale().scrollToRealTime();
+
     // Update signal lines
     if (chart.priceLines) {
       chart.priceLines.forEach((l: any) => {
