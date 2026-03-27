@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal
 from backtest import calculate_strategy_score, calculate_kelly, run_backtest
 from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
 from signal_scoring import calculate_enhanced_score
+from ws_feed import price_feed
 
 load_dotenv()
 
@@ -44,9 +45,17 @@ app.add_middleware(
 KILO_API_KEY = os.getenv("KILO_API_KEY", "")
 
 try:
+    headers = {}
+    gateway_auth = os.getenv("GATEWAY_AUTH")
+    if gateway_auth:
+        headers["GatewayAuth"] = gateway_auth
+
+    base_url = os.getenv("OPENAI_BASE_URL", "https://api.kilo.ai/api/gateway")
+
     client = openai.AsyncOpenAI(
         api_key=KILO_API_KEY,
-        base_url="https://api.kilo.ai/api/gateway"
+        base_url=base_url,
+        default_headers=headers if headers else None
     )
 except Exception as e:
     print(f"Warning: OpenAI client init failed: {e}")
@@ -670,6 +679,28 @@ async def signal_history_endpoint(limit: int = 20):
 
 
 # ═══════════════════════════════════════════════════════════
+#  WEBSOCKET LIVE PRICE FEED
+# ═══════════════════════════════════════════════════════════
+
+@app.websocket("/ws/prices/{ticker}")
+async def ws_prices(websocket: WebSocket, ticker: str):
+    """Stream live candle updates for a ticker via WebSocket."""
+    await websocket.accept()
+    symbol = ticker.upper().strip()
+    q = price_feed.subscribe(symbol)
+    try:
+        while True:
+            msg = await q.get()
+            await websocket.send_text(msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        price_feed.unsubscribe(symbol, q)
+
+
+# ═══════════════════════════════════════════════════════════
 #  WATCHLIST SCANNER
 # ═══════════════════════════════════════════════════════════
 
@@ -777,6 +808,7 @@ async def watchlist_scan(request: WatchlistRequest):
 # ═══════════════════════════════════════════════════════════
 
 CONSENSUS_MODELS = [
+    "openai/gpt-4o",
     "openai/gpt-4o-mini",
     "anthropic/claude-3.5-haiku",
     "google/gemini-2.5-flash",

@@ -53,7 +53,7 @@ export function MultiChartGrid({
   // Initial load + polling
   useEffect(() => {
     fetchAll(ticker);
-    const interval = setInterval(() => fetchAll(ticker), 15000); // 15s for multi-chart (4x requests)
+    const interval = setInterval(() => fetchAll(ticker), 45000); // 45s — WS handles real-time candle ticks
     return () => clearInterval(interval);
   }, [ticker, fetchAll]);
 

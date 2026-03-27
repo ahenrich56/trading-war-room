@@ -124,14 +124,14 @@ export default function WarRoomDashboard() {
     }
   }, []);
 
-  // Auto-refresh chart + poll every 10s
+  // Auto-refresh chart data (indicators/order flow) — WS handles real-time candles
   useEffect(() => {
     const timer = setTimeout(() => {
       if (ticker.length >= 1) loadChartData(ticker, timeframe);
     }, 600);
     const intervalId = setInterval(() => {
       if (ticker.length >= 1) loadChartData(ticker, timeframe);
-    }, 10000);
+    }, 30000); // 30s — WS streams candle ticks between refreshes
     return () => { clearTimeout(timer); clearInterval(intervalId); };
   }, [ticker, timeframe, loadChartData]);
 

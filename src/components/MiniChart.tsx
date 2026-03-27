@@ -411,9 +411,81 @@ export function MiniChart({
 
   }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, drawBubbles]);
 
+  // ── WebSocket live price streaming ──
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsReconnectRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!chartRef.current || !chartData?.candles?.length) return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+    if (!apiUrl) return;
+
+    // Build WS URL from API URL (https → wss, http → ws)
+    const wsBase = apiUrl.replace(/^http/, "ws");
+    const wsUrl = `${wsBase}/ws/prices/${encodeURIComponent(ticker)}`;
+
+    let alive = true;
+
+    const connect = () => {
+      if (!alive) return;
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+      }
+
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        const chart = chartRef.current;
+        if (!chart) return;
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "candle" && msg.data) {
+            const c = msg.data;
+            // Incremental update — no full setData rebuild
+            chart.candleSeries.update({
+              time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+            });
+            chart.volumeSeries.update({
+              time: c.time,
+              value: c.volume,
+              color: c.close >= c.open ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)",
+            });
+          }
+        } catch (_) {}
+      };
+
+      ws.onclose = () => {
+        if (alive) {
+          wsReconnectRef.current = setTimeout(connect, 5000);
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      alive = false;
+      if (wsReconnectRef.current) clearTimeout(wsReconnectRef.current);
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+        wsRef.current = null;
+      }
+    };
+  }, [ticker, chartData]);
+
   // Clean up on component unmount
   useEffect(() => {
     return () => {
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+        wsRef.current = null;
+      }
       if (chartRef.current) {
         if (chartRef.current.cleanupResize) chartRef.current.cleanupResize();
         chartRef.current.remove();
