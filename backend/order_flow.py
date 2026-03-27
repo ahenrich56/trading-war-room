@@ -547,7 +547,10 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
         })
 
     # Volume heatmap: per-candle volume distributed across price bins (last 200 bars)
-    heatmap_bins = 12  # price divisions per candle
+    # Uses a bell-curve distribution centred on the close price so bins near
+    # the close get more volume (realistic approximation from OHLCV).
+    import math
+    heatmap_bins = 5  # fewer, larger bins for visibility
     heatmap = []
     heatmap_df = df_delta.tail(200)
     for _, row in heatmap_df.iterrows():
@@ -557,16 +560,26 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
         bar_buy = float(row["buy_vol"])
         bar_sell = float(row["sell_vol"])
         bar_range = bar_h - bar_l
+        bar_close = float(row["Close"])
         t = int(row.name.timestamp())
 
         if bar_range == 0 or bar_vol == 0:
             continue
 
         bin_size = bar_range / heatmap_bins
+        # Build gaussian weights centred on close price
+        weights = []
+        for i in range(heatmap_bins):
+            mid = bar_l + (i + 0.5) * bin_size
+            dist = abs(mid - bar_close) / bar_range  # 0-1
+            w = math.exp(-4.0 * dist * dist)  # bell curve
+            weights.append(w)
+        total_w = sum(weights) or 1.0
+
         for i in range(heatmap_bins):
             bl = bar_l + i * bin_size
             bh = bl + bin_size
-            frac = 1.0 / heatmap_bins
+            frac = weights[i] / total_w
             heatmap.append({
                 "time": t,
                 "price_low": round(bl, 2),

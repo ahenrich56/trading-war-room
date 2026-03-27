@@ -219,35 +219,45 @@ export function MiniChart({
     }
     if (maxVol === 0) return;
 
+    // Dynamic cell width based on candle spacing
+    let cellWidth = 10;
+    const candles = chartData.candles;
+    if (candles?.length >= 2) {
+      const c0 = candles[candles.length - 2];
+      const c1 = candles[candles.length - 1];
+      const x0 = timeScale.timeToCoordinate(c0.time);
+      const x1 = timeScale.timeToCoordinate(c1.time);
+      if (x0 !== null && x1 !== null) {
+        cellWidth = Math.max(4, Math.abs(x1 - x0) * 0.85);
+      }
+    }
+
     for (const cell of heatmap) {
       const x = timeScale.timeToCoordinate(cell.time);
-      if (x === null || x < -20 || x > canvas.width + 20) continue;
+      if (x === null || x < -cellWidth || x > canvas.width + cellWidth) continue;
 
       const yTop = candleSeries.priceToCoordinate(cell.price_high);
       const yBot = candleSeries.priceToCoordinate(cell.price_low);
       if (yTop === null || yBot === null) continue;
 
       const intensity = cell.vol / maxVol;
-      const h = Math.abs(yBot - yTop);
-      const w = 8; // fixed width per cell
+      const h = Math.max(4, Math.abs(yBot - yTop)); // minimum 4px tall
 
       // Color by buy/sell dominance
-      const buyRatio = cell.buy / (cell.buy + cell.sell || 1);
+      const total = cell.buy + cell.sell || 1;
+      const buyRatio = cell.buy / total;
       let r: number, g: number, b: number;
       if (buyRatio > 0.55) {
-        // Green (buy-dominant)
         r = 34; g = 197; b = 94;
       } else if (buyRatio < 0.45) {
-        // Red (sell-dominant)
         r = 239; g = 68; b = 68;
       } else {
-        // Neutral amber
         r = 245; g = 158; b = 11;
       }
 
-      const alpha = 0.08 + intensity * 0.45;
+      const alpha = 0.12 + intensity * 0.50;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-      ctx.fillRect(x - w / 2, Math.min(yTop, yBot), w, Math.max(h, 1));
+      ctx.fillRect(x - cellWidth / 2, Math.min(yTop, yBot), cellWidth, h);
     }
   }, [chartData, showHeatmap]);
 
