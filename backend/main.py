@@ -1003,6 +1003,59 @@ async def get_whale_alerts(ticker: str):
 
 
 # ═══════════════════════════════════════════════════════════
+#  MARKET OVERVIEW / HEATMAP
+# ═══════════════════════════════════════════════════════════
+
+HEATMAP_TICKERS = {
+    "Indices": ["NQ1", "ES1", "YM1", "RTY1"],
+    "Energy": ["CL1"],
+    "Metals": ["GC1", "SI1"],
+    "Bonds": ["ZB1"],
+    "Crypto": ["BTC1", "ETH1"],
+}
+
+_market_cache: dict = {"data": None, "ts": 0}
+
+
+def _fetch_ticker_snapshot(ticker: str) -> dict:
+    """Fetch current price and % change for a single ticker."""
+    try:
+        yf_symbol = resolve_ticker(ticker)
+        tk = yf.Ticker(yf_symbol)
+        info = tk.fast_info
+        price = round(float(info.last_price), 2) if hasattr(info, "last_price") else 0
+        prev = round(float(info.previous_close), 2) if hasattr(info, "previous_close") else 0
+        pct = round((price - prev) / prev * 100, 2) if prev > 0 else 0
+        return {"ticker": ticker, "price": price, "change_pct": pct}
+    except Exception:
+        return {"ticker": ticker, "price": 0, "change_pct": 0}
+
+
+@app.get("/api/v1/market-overview")
+async def market_overview():
+    """Return grouped market data for heatmap. Cached 30s."""
+    import time as _time
+
+    now = _time.time()
+    if _market_cache["data"] and now - _market_cache["ts"] < 30:
+        return _market_cache["data"]
+
+    result = {}
+    all_tickers = [t for group in HEATMAP_TICKERS.values() for t in group]
+    snapshots = await asyncio.gather(
+        *[asyncio.to_thread(_fetch_ticker_snapshot, t) for t in all_tickers]
+    )
+    snap_map = {s["ticker"]: s for s in snapshots}
+
+    for group, tickers in HEATMAP_TICKERS.items():
+        result[group] = [snap_map.get(t, {"ticker": t, "price": 0, "change_pct": 0}) for t in tickers]
+
+    _market_cache["data"] = result
+    _market_cache["ts"] = now
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
 #  ALERTS API + AUTO-SCANNER
 # ═══════════════════════════════════════════════════════════
 

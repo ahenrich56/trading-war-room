@@ -15,7 +15,8 @@ import { WatchlistPage } from "@/components/WatchlistPage";
 import { ChartOverlayToggles } from "@/components/ChartOverlayToggles";
 import { MultiChartGrid } from "@/components/MultiChartGrid";
 import { AlertBell } from "@/components/AlertBell";
-import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid } from "lucide-react";
+import { MarketHeatmap } from "@/components/MarketHeatmap";
+import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3 } from "lucide-react";
 
 const ALL_STAGES = [
   "FUNDAMENTAL_ANALYST",
@@ -47,7 +48,7 @@ export default function WarRoomDashboard() {
   const [signalHistory, setSignalHistory] = useState<SignalPayload[]>([]);
 
   // Sidebar navigation
-  const [activeView, setActiveView] = useState<"main" | "watchlist" | "journal" | "consensus">("main");
+  const [activeView, setActiveView] = useState<"main" | "watchlist" | "journal" | "consensus" | "markets">("main");
 
   const [watchlistData, setWatchlistData] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -318,6 +319,13 @@ export default function WarRoomDashboard() {
           >
             <Users className="h-5 w-5" />
           </button>
+          <button
+            onClick={() => setActiveView("markets")}
+            title="Markets"
+            className={`p-2.5 rounded-xl transition-all ${activeView === "markets" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}
+          >
+            <BarChart3 className="h-5 w-5" />
+          </button>
         </div>
         <div className="mt-auto">
           <Settings className="h-5 w-5 text-[#4A4A6A] hover:text-white cursor-pointer transition-colors" />
@@ -483,6 +491,11 @@ export default function WarRoomDashboard() {
           {/* ═══ CONSENSUS ═══ */}
           {activeView === "consensus" && (
             <ConsensusPanel data={consensusData} isRunning={isConsensusRunning} ticker={ticker} />
+          )}
+
+          {/* ═══ MARKETS HEATMAP ═══ */}
+          {activeView === "markets" && (
+            <MarketHeatmap onTickerSelect={(t) => { setTicker(t); setActiveView("main"); }} />
           )}
 
           {/* ═══ AGENTS — main view only ═══ */}
