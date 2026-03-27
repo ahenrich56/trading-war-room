@@ -36,6 +36,7 @@ export function MiniChart({
   const chartRef = useRef<any>(null);
   const prevTickerRef = useRef<string>("");
   const prevTimeframeRef = useRef<string>("");
+  const drawOverlaysRef = useRef<() => void>(() => {});
   const [lwcLoaded, setLwcLoaded] = useState(false);
   const [lwcModule, setLwcModule] = useState<any>(null);
 
@@ -294,15 +295,16 @@ export function MiniChart({
       const handleResize = () => {
         if (containerRef.current && chartRef.current) {
           chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-          clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint();
+          drawOverlaysRef.current();
         }
       };
       window.addEventListener("resize", handleResize);
       chart.cleanupResize = () => window.removeEventListener("resize", handleResize);
 
       // Redraw bubbles on scroll/zoom
+      // Use ref so scroll handler always calls latest draw functions (avoids stale closures)
       chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-        clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint();
+        drawOverlaysRef.current();
       });
     }
 
@@ -529,7 +531,9 @@ export function MiniChart({
     }
 
     // Draw bubbles after chart data is set
-    requestAnimationFrame(() => { clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint(); });
+    // Keep the ref updated so scroll/resize always call latest draw functions
+    drawOverlaysRef.current = () => { clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint(); };
+    requestAnimationFrame(drawOverlaysRef.current);
 
   }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, showFootprint, showHeatmap, clearCanvas, drawBubbles, drawFootprint, drawHeatmap]);
 
