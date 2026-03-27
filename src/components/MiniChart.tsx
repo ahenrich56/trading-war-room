@@ -105,12 +105,12 @@ export function MiniChart({
       const ratio = candle.volume / avgVol;
       const radius = Math.min(28, Math.max(6, ratio * 8));
 
-      // Color: buy (green/cyan) vs sell (red/magenta) based on delta
+      // Color: buy = green, sell = red based on delta
       const delta = deltaMap.get(candle.time);
       const isBuy = delta ? delta.value > 0 : candle.close >= candle.open;
 
-      const color = isBuy ? "rgba(34, 211, 238, 0.55)" : "rgba(192, 38, 211, 0.55)";
-      const borderColor = isBuy ? "rgba(34, 211, 238, 0.8)" : "rgba(192, 38, 211, 0.8)";
+      const color = isBuy ? "rgba(34, 197, 94, 0.45)" : "rgba(239, 68, 68, 0.45)";
+      const borderColor = isBuy ? "rgba(34, 197, 94, 0.85)" : "rgba(239, 68, 68, 0.85)";
 
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -120,13 +120,17 @@ export function MiniChart({
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Show volume text inside large bubbles
+      // Show volume text inside large bubbles with dark backing for readability
       if (radius >= 14) {
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.font = `bold ${Math.max(8, radius * 0.55)}px JetBrains Mono, monospace`;
+        const fontSize = Math.max(8, radius * 0.5);
+        ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const volText = candle.volume >= 10000 ? `${(candle.volume / 1000).toFixed(0)}K` : `${candle.volume}`;
+        // Dark text shadow for contrast
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillText(volText, x + 0.5, y + 0.5);
+        ctx.fillStyle = "#ffffff";
         ctx.fillText(volText, x, y);
       }
     }
