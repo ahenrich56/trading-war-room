@@ -14,6 +14,8 @@ interface MiniChartProps {
   showCVD?: boolean;
   showVwapBands?: boolean;
   showVP?: boolean;
+  showFootprint?: boolean;
+  showHeatmap?: boolean;
   compact?: boolean;
 }
 
@@ -25,6 +27,8 @@ export function MiniChart({
   showCVD = false,
   showVwapBands = false,
   showVP = false,
+  showFootprint = false,
+  showHeatmap = false,
   compact = false,
 }: MiniChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,28 +52,26 @@ export function MiniChart({
     return () => { document.head.removeChild(script); };
   }, []);
 
+  // ── Clear canvas helper (called before all overlays) ──
+  const clearCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.parentElement?.getBoundingClientRect();
+    if (rect) { canvas.width = rect.width; canvas.height = rect.height; }
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
   // ── Draw big-trade bubbles on canvas overlay ──
   const drawBubbles = useCallback(() => {
     const chart = chartRef.current;
     const canvas = canvasRef.current;
     if (!chart || !canvas || !showBubbles || !chartData?.candles?.length) {
-      if (canvas) {
-        const ctx = canvas.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
       return;
     }
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    // Match canvas size to container
-    const rect = canvas.parentElement?.getBoundingClientRect();
-    if (rect) {
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const candles = chartData.candles;
     const deltaMap = new Map<number, any>();
@@ -130,6 +132,120 @@ export function MiniChart({
     }
   }, [chartData, showBubbles]);
 
+  // ── Draw footprint overlay: buy/sell vol text beside each candle ──
+  const drawFootprint = useCallback(() => {
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    if (!chart || !canvas || !showFootprint || !chartData?.order_flow?.footprint?.length) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const footprint = chartData.order_flow.footprint;
+    const fpMap = new Map<number, any>();
+    for (const fp of footprint) fpMap.set(fp.time, fp);
+
+    const timeScale = chart.timeScale();
+    const candleSeries = chart.candleSeries;
+    const candles = chartData.candles;
+
+    for (const candle of candles) {
+      const fp = fpMap.get(candle.time);
+      if (!fp || fp.volume === 0) continue;
+
+      const x = timeScale.timeToCoordinate(candle.time);
+      if (x === null || x < 0 || x > canvas.width) continue;
+
+      const yHigh = candleSeries.priceToCoordinate(candle.high);
+      const yLow = candleSeries.priceToCoordinate(candle.low);
+      if (yHigh === null || yLow === null) continue;
+
+      const bodyHeight = Math.abs(yLow - yHigh);
+      if (bodyHeight < 20) continue; // skip tiny candles
+
+      const fontSize = Math.max(7, Math.min(9, bodyHeight * 0.18));
+      ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
+      ctx.textAlign = "center";
+
+      const buyK = fp.buy_vol >= 1000 ? `${(fp.buy_vol / 1000).toFixed(1)}K` : `${Math.round(fp.buy_vol)}`;
+      const sellK = fp.sell_vol >= 1000 ? `${(fp.sell_vol / 1000).toFixed(1)}K` : `${Math.round(fp.sell_vol)}`;
+
+      // Buy vol (top of candle, green)
+      const yBuy = Math.min(yHigh, yLow) + bodyHeight * 0.25;
+      ctx.fillStyle = "rgba(34, 197, 94, 0.85)";
+      ctx.fillText(buyK, x, yBuy);
+
+      // Sell vol (bottom of candle, red)
+      const ySell = Math.min(yHigh, yLow) + bodyHeight * 0.75;
+      ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
+      ctx.fillText(sellK, x, ySell);
+
+      // Delta at very bottom
+      if (bodyHeight > 35) {
+        const dText = fp.delta > 0 ? `+${fp.delta_pct}%` : `${fp.delta_pct}%`;
+        ctx.fillStyle = fp.delta > 0 ? "rgba(34, 211, 238, 0.7)" : "rgba(192, 38, 211, 0.7)";
+        ctx.font = `${Math.max(6, fontSize - 1)}px JetBrains Mono, monospace`;
+        ctx.fillText(dText, x, Math.max(yHigh, yLow) + 8);
+      }
+    }
+  }, [chartData, showFootprint]);
+
+  // ── Draw volume heatmap: colored rectangles at price levels ──
+  const drawHeatmap = useCallback(() => {
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    if (!chart || !canvas || !showHeatmap || !chartData?.order_flow?.heatmap?.length) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const heatmap = chartData.order_flow.heatmap;
+    const timeScale = chart.timeScale();
+    const candleSeries = chart.candleSeries;
+
+    // Find max volume for normalization
+    let maxVol = 0;
+    for (const cell of heatmap) {
+      if (cell.vol > maxVol) maxVol = cell.vol;
+    }
+    if (maxVol === 0) return;
+
+    for (const cell of heatmap) {
+      const x = timeScale.timeToCoordinate(cell.time);
+      if (x === null || x < -20 || x > canvas.width + 20) continue;
+
+      const yTop = candleSeries.priceToCoordinate(cell.price_high);
+      const yBot = candleSeries.priceToCoordinate(cell.price_low);
+      if (yTop === null || yBot === null) continue;
+
+      const intensity = cell.vol / maxVol;
+      const h = Math.abs(yBot - yTop);
+      const w = 8; // fixed width per cell
+
+      // Color by buy/sell dominance
+      const buyRatio = cell.buy / (cell.buy + cell.sell || 1);
+      let r: number, g: number, b: number;
+      if (buyRatio > 0.55) {
+        // Green (buy-dominant)
+        r = 34; g = 197; b = 94;
+      } else if (buyRatio < 0.45) {
+        // Red (sell-dominant)
+        r = 239; g = 68; b = 68;
+      } else {
+        // Neutral amber
+        r = 245; g = 158; b = 11;
+      }
+
+      const alpha = 0.08 + intensity * 0.45;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      ctx.fillRect(x - w / 2, Math.min(yTop, yBot), w, Math.max(h, 1));
+    }
+  }, [chartData, showHeatmap]);
+
   // Render chart when data arrives
   useEffect(() => {
     if (!lwcLoaded || !lwcModule || !containerRef.current || !chartData?.candles?.length) return;
@@ -174,14 +290,16 @@ export function MiniChart({
       const handleResize = () => {
         if (containerRef.current && chartRef.current) {
           chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-          drawBubbles(); // redraw bubbles on resize
+          clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint();
         }
       };
       window.addEventListener("resize", handleResize);
       chart.cleanupResize = () => window.removeEventListener("resize", handleResize);
 
       // Redraw bubbles on scroll/zoom
-      chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawBubbles());
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint();
+      });
     }
 
     const chart = chartRef.current;
@@ -407,9 +525,9 @@ export function MiniChart({
     }
 
     // Draw bubbles after chart data is set
-    requestAnimationFrame(drawBubbles);
+    requestAnimationFrame(() => { clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint(); });
 
-  }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, drawBubbles]);
+  }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, showFootprint, showHeatmap, clearCanvas, drawBubbles, drawFootprint, drawHeatmap]);
 
   // ── WebSocket live price streaming ──
   const wsRef = useRef<WebSocket | null>(null);

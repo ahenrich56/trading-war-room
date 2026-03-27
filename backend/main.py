@@ -570,6 +570,8 @@ async def get_chart_data(req: ChartDataRequest):
                 "cvd": of_data.get("cvd", []),
                 "volume_profile": of_data.get("volume_profile", {}),
                 "vwap_bands": of_data.get("vwap_bands", {}),
+                "footprint": of_data.get("footprint", []),
+                "heatmap": of_data.get("heatmap", []),
             } if of_data else {}
         }
     except Exception as e:
@@ -648,6 +650,8 @@ async def chart_data_endpoint(request: ChartRequest):
                 "cvd": of_data.get("cvd", []),
                 "volume_profile": of_data.get("volume_profile", {}),
                 "vwap_bands": of_data.get("vwap_bands", {}),
+                "footprint": of_data.get("footprint", []),
+                "heatmap": of_data.get("heatmap", []),
                 "summary": of_data.get("summary", {}),
             } if of_data else {},
             "ticker": ticker,

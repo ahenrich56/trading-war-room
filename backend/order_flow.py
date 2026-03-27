@@ -534,10 +534,53 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
     else:
         cvd_trend = "FLAT"
 
+    # Footprint data: buy/sell volume per candle for footprint overlay
+    footprint = []
+    for idx, row in df_delta.iterrows():
+        footprint.append({
+            "time": int(idx.timestamp()),
+            "buy_vol": round(float(row["buy_vol"]), 0),
+            "sell_vol": round(float(row["sell_vol"]), 0),
+            "delta": round(float(row["delta"]), 0),
+            "delta_pct": round(float(row["delta_pct"]), 1),
+            "volume": round(float(row["Volume"]), 0),
+        })
+
+    # Volume heatmap: per-candle volume distributed across price bins
+    heatmap_bins = 12  # price divisions per candle
+    heatmap = []
+    for _, row in df_delta.iterrows():
+        bar_h = float(row["High"])
+        bar_l = float(row["Low"])
+        bar_vol = float(row["Volume"])
+        bar_buy = float(row["buy_vol"])
+        bar_sell = float(row["sell_vol"])
+        bar_range = bar_h - bar_l
+        t = int(row.name.timestamp())
+
+        if bar_range == 0 or bar_vol == 0:
+            continue
+
+        bin_size = bar_range / heatmap_bins
+        for i in range(heatmap_bins):
+            bl = bar_l + i * bin_size
+            bh = bl + bin_size
+            frac = 1.0 / heatmap_bins
+            heatmap.append({
+                "time": t,
+                "price_low": round(bl, 2),
+                "price_high": round(bh, 2),
+                "vol": round(bar_vol * frac, 0),
+                "buy": round(bar_buy * frac, 0),
+                "sell": round(bar_sell * frac, 0),
+            })
+
     return {
         "delta_bars": delta_bars,
         "cvd": cvd_points,
         "volume_profile": volume_profile,
+        "footprint": footprint,
+        "heatmap": heatmap,
         "divergences": divergences,
         "absorptions": absorptions,
         "stacked_imbalances": stacked_imbalances,
