@@ -156,6 +156,28 @@ export function MiniChart({
     const candleSeries = chart.candleSeries;
     const candles = chartData.candles;
 
+    // Calculate pixel width per candle to decide rendering approach
+    let candleWidth = 0;
+    if (candles.length >= 2) {
+      const cPrev = candles[candles.length - 2];
+      const cLast = candles[candles.length - 1];
+      const xPrev = timeScale.timeToCoordinate(cPrev.time);
+      const xLast = timeScale.timeToCoordinate(cLast.time);
+      if (xPrev !== null && xLast !== null) {
+        candleWidth = Math.abs(xLast - xPrev);
+      }
+    }
+
+    // Need minimum candle spacing for readable text
+    if (candleWidth < 8) return;
+
+    const fontSize = Math.min(10, Math.max(7, candleWidth * 0.3));
+    ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    let lastRenderedX = -100; // prevent text overlap between adjacent candles
+
     for (const candle of candles) {
       const fp = fpMap.get(candle.time);
       if (!fp || fp.volume === 0) continue;
@@ -163,37 +185,49 @@ export function MiniChart({
       const x = timeScale.timeToCoordinate(candle.time);
       if (x === null || x < 0 || x > canvas.width) continue;
 
+      // Skip if too close to last rendered label to avoid overlap
+      if (Math.abs(x - lastRenderedX) < candleWidth * 0.95) continue;
+
       const yHigh = candleSeries.priceToCoordinate(candle.high);
       const yLow = candleSeries.priceToCoordinate(candle.low);
       if (yHigh === null || yLow === null) continue;
 
-      const bodyHeight = Math.abs(yLow - yHigh);
-      if (bodyHeight < 20) continue; // skip tiny candles
+      const yTop = Math.min(yHigh, yLow);
+      const yBot = Math.max(yHigh, yLow);
 
-      const fontSize = Math.max(7, Math.min(9, bodyHeight * 0.18));
-      ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
-      ctx.textAlign = "center";
+      // Format volume
+      const buyK = fp.buy_vol >= 1000 ? `${(fp.buy_vol / 1000).toFixed(0)}K` : `${Math.round(fp.buy_vol)}`;
+      const sellK = fp.sell_vol >= 1000 ? `${(fp.sell_vol / 1000).toFixed(0)}K` : `${Math.round(fp.sell_vol)}`;
 
-      const buyK = fp.buy_vol >= 1000 ? `${(fp.buy_vol / 1000).toFixed(1)}K` : `${Math.round(fp.buy_vol)}`;
-      const sellK = fp.sell_vol >= 1000 ? `${(fp.sell_vol / 1000).toFixed(1)}K` : `${Math.round(fp.sell_vol)}`;
+      // Buy vol above candle high (green with dark bg)
+      const buyY = yTop - fontSize * 0.8;
+      const buyW = ctx.measureText(buyK).width + 4;
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(x - buyW / 2, buyY - fontSize / 2 - 1, buyW, fontSize + 2);
+      ctx.fillStyle = "#22c55e";
+      ctx.fillText(buyK, x, buyY);
 
-      // Buy vol (top of candle, green)
-      const yBuy = Math.min(yHigh, yLow) + bodyHeight * 0.25;
-      ctx.fillStyle = "rgba(34, 197, 94, 0.85)";
-      ctx.fillText(buyK, x, yBuy);
+      // Sell vol below candle low (red with dark bg)
+      const sellY = yBot + fontSize * 0.8;
+      const sellW = ctx.measureText(sellK).width + 4;
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(x - sellW / 2, sellY - fontSize / 2 - 1, sellW, fontSize + 2);
+      ctx.fillStyle = "#ef4444";
+      ctx.fillText(sellK, x, sellY);
 
-      // Sell vol (bottom of candle, red)
-      const ySell = Math.min(yHigh, yLow) + bodyHeight * 0.75;
-      ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
-      ctx.fillText(sellK, x, ySell);
-
-      // Delta at very bottom
-      if (bodyHeight > 35) {
-        const dText = fp.delta > 0 ? `+${fp.delta_pct}%` : `${fp.delta_pct}%`;
-        ctx.fillStyle = fp.delta > 0 ? "rgba(34, 211, 238, 0.7)" : "rgba(192, 38, 211, 0.7)";
-        ctx.font = `${Math.max(6, fontSize - 1)}px JetBrains Mono, monospace`;
-        ctx.fillText(dText, x, Math.max(yHigh, yLow) + 8);
+      // Delta % in center of body if enough room
+      const bodyH = yBot - yTop;
+      if (bodyH > 18 && candleWidth > 18) {
+        const dPct = fp.delta_pct;
+        const dText = dPct > 0 ? `+${dPct}%` : `${dPct}%`;
+        const smallFont = Math.max(6, fontSize - 1);
+        ctx.font = `${smallFont}px JetBrains Mono, monospace`;
+        ctx.fillStyle = fp.delta > 0 ? "#22d3ee" : "#c026d3";
+        ctx.fillText(dText, x, (yTop + yBot) / 2);
+        ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
       }
+
+      lastRenderedX = x;
     }
   }, [chartData, showFootprint]);
 
@@ -350,7 +384,7 @@ export function MiniChart({
         return {
           time: c.time,
           value: c.volume,
-          color: isBuy ? "rgba(34, 211, 238, 0.35)" : "rgba(192, 38, 211, 0.35)",
+          color: isBuy ? "rgba(34, 211, 238, 0.5)" : "rgba(192, 38, 211, 0.5)",
         };
       });
       chart.volumeSeries.setData(deltaVolData);
@@ -377,7 +411,7 @@ export function MiniChart({
         lastValueVisible: false,
       });
       cvdSeries.priceScale().applyOptions({
-        scaleMargins: { top: 0.1, bottom: 0.4 },
+        scaleMargins: { top: 0.65, bottom: 0.02 },
         visible: false,
       });
       cvdSeries.setData(of.cvd);
@@ -394,10 +428,10 @@ export function MiniChart({
     }
     if (showVwapBands && of.vwap_bands) {
       const bandDefs = [
-        { key: "upper_1", color: "rgba(167, 139, 250, 0.3)", style: 2 },
-        { key: "lower_1", color: "rgba(167, 139, 250, 0.3)", style: 2 },
-        { key: "upper_2", color: "rgba(239, 68, 68, 0.25)", style: 2 },
-        { key: "lower_2", color: "rgba(239, 68, 68, 0.25)", style: 2 },
+        { key: "upper_1", color: "rgba(167, 139, 250, 0.5)", style: 2 },
+        { key: "lower_1", color: "rgba(167, 139, 250, 0.5)", style: 2 },
+        { key: "upper_2", color: "rgba(239, 68, 68, 0.4)", style: 2 },
+        { key: "lower_2", color: "rgba(239, 68, 68, 0.4)", style: 2 },
       ];
       for (const bd of bandDefs) {
         const data = of.vwap_bands[bd.key];
@@ -433,13 +467,13 @@ export function MiniChart({
       }
       if (vp.vah) {
         chart._ofSeries.vpLines.push(chart.candleSeries.createPriceLine({
-          price: vp.vah, color: "rgba(245, 158, 11, 0.4)", lineWidth: 1, lineStyle: 2,
+          price: vp.vah, color: "rgba(245, 158, 11, 0.65)", lineWidth: 1, lineStyle: 2,
           axisLabelVisible: true, title: "VAH",
         }));
       }
       if (vp.val) {
         chart._ofSeries.vpLines.push(chart.candleSeries.createPriceLine({
-          price: vp.val, color: "rgba(245, 158, 11, 0.4)", lineWidth: 1, lineStyle: 2,
+          price: vp.val, color: "rgba(245, 158, 11, 0.65)", lineWidth: 1, lineStyle: 2,
           axisLabelVisible: true, title: "VAL",
         }));
       }
