@@ -22,7 +22,7 @@ from data_fetcher import (
     TIMEFRAME_CONFIG, fetch_multi_timeframe_data, build_mtf_summary,
     fetch_market_context, get_economic_calendar,
 )
-from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal_history, report_outcome, get_outcomes, monitor_active_trades
+from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal_history, report_outcome, get_outcomes, monitor_active_trades, store_alert, get_alerts, mark_alerts_read, get_unread_count
 from backtest import calculate_strategy_score, calculate_kelly, run_backtest
 from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
 from signal_scoring import calculate_enhanced_score
@@ -1003,6 +1003,68 @@ async def get_whale_alerts(ticker: str):
 
 
 # ═══════════════════════════════════════════════════════════
+#  ALERTS API + AUTO-SCANNER
+# ═══════════════════════════════════════════════════════════
+
+SCAN_WATCHLIST = ["NQ1", "ES1", "YM1", "RTY1", "GC1", "CL1", "BTC1"]
+
+@app.get("/api/v1/alerts")
+async def alerts_endpoint(since: str | None = None, limit: int = 30):
+    """Return recent alerts, optionally filtered by since timestamp."""
+    alerts = get_alerts(since=since, limit=limit)
+    unread = get_unread_count()
+    return {"alerts": alerts, "unread": unread}
+
+@app.post("/api/v1/alerts/read")
+async def mark_read_endpoint():
+    """Mark all alerts as read."""
+    mark_alerts_read()
+    return {"status": "ok"}
+
+
+async def auto_scan_loop():
+    """Background task: scan watchlist every 5 minutes for high-grade signals."""
+    await asyncio.sleep(30)  # Wait for app to stabilize
+
+    while True:
+        try:
+            for ticker in SCAN_WATCHLIST:
+                try:
+                    result = await asyncio.to_thread(quick_scan_ticker, ticker, "5m")
+                    if not result or result.get("error"):
+                        continue
+
+                    grade = result.get("grade", "F")
+                    score = result.get("score", 0)
+                    direction = result.get("direction", "NEUTRAL")
+
+                    # Only alert on grade B+ or better with clear direction
+                    if grade in ("A+", "A", "A-", "B+") and direction in ("LONG", "SHORT") and score >= 60:
+                        store_alert(
+                            alert_type="signal_opportunity",
+                            ticker=ticker,
+                            data={
+                                "grade": grade,
+                                "score": score,
+                                "direction": direction,
+                                "price": result.get("current_price"),
+                                "rsi": result.get("rsi"),
+                                "vol_ratio": result.get("vol_ratio"),
+                                "message": f"{ticker} {direction} — Grade {grade} ({score}%)",
+                            },
+                        )
+                except Exception:
+                    pass
+
+                await asyncio.sleep(2)  # Brief pause between tickers
+
+        except Exception as e:
+            print(f"Auto-scan error: {e}")
+
+        await asyncio.sleep(300)  # 5 minutes
+
+
+# ═══════════════════════════════════════════════════════════
 #  STARTUP & HEALTH
 # ═══════════════════════════════════════════════════════════
 
@@ -1010,6 +1072,7 @@ async def get_whale_alerts(ticker: str):
 async def startup_event():
     """Start background tasks on application launch."""
     asyncio.create_task(monitor_active_trades(executor, resolve_ticker))
+    asyncio.create_task(auto_scan_loop())
 
 
 @app.get("/health")

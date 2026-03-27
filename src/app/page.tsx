@@ -14,6 +14,7 @@ import { TradeJournal } from "@/components/TradeJournal";
 import { WatchlistPage } from "@/components/WatchlistPage";
 import { ChartOverlayToggles } from "@/components/ChartOverlayToggles";
 import { MultiChartGrid } from "@/components/MultiChartGrid";
+import { AlertBell } from "@/components/AlertBell";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid } from "lucide-react";
 
 const ALL_STAGES = [
@@ -403,6 +404,7 @@ export default function WarRoomDashboard() {
                   <X className="h-3 w-3" /> STOP
                 </Button>
               )}
+              <AlertBell onTickerSelect={(t) => { setTicker(t); setActiveView("main"); }} />
             </div>
           </div>
         </header>

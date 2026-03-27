@@ -36,6 +36,18 @@ def _init_db():
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            data TEXT NOT NULL,
+            read INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -126,6 +138,57 @@ def get_outcomes() -> dict:
         "outcomes": outcome_list[:20],
         "learning_context": context,
     }
+
+
+def store_alert(alert_type: str, ticker: str, data: dict):
+    """Store a new alert."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO alerts (type, ticker, data) VALUES (?, ?, ?)",
+        (alert_type, ticker, json.dumps(data)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_alerts(since: str | None = None, limit: int = 30) -> list:
+    """Return recent alerts, optionally filtered by timestamp."""
+    conn = sqlite3.connect(DB_PATH)
+    if since:
+        rows = conn.execute(
+            "SELECT id, type, ticker, data, read, created_at FROM alerts WHERE created_at > ? ORDER BY id DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, type, ticker, data, read, created_at FROM alerts ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "type": r[1], "ticker": r[2], "data": json.loads(r[3]), "read": bool(r[4]), "created_at": r[5]}
+        for r in rows
+    ]
+
+
+def mark_alerts_read(alert_ids: list[int] | None = None):
+    """Mark alerts as read. If no IDs given, marks all unread."""
+    conn = sqlite3.connect(DB_PATH)
+    if alert_ids:
+        placeholders = ",".join("?" for _ in alert_ids)
+        conn.execute(f"UPDATE alerts SET read = 1 WHERE id IN ({placeholders})", alert_ids)
+    else:
+        conn.execute("UPDATE alerts SET read = 1 WHERE read = 0")
+    conn.commit()
+    conn.close()
+
+
+def get_unread_count() -> int:
+    """Return count of unread alerts."""
+    conn = sqlite3.connect(DB_PATH)
+    count = conn.execute("SELECT COUNT(*) FROM alerts WHERE read = 0").fetchone()[0]
+    conn.close()
+    return count
 
 
 async def monitor_active_trades(executor, resolve_ticker_fn):
