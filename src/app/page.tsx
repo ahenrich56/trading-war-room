@@ -12,6 +12,7 @@ import { SignalStrip } from "@/components/SignalStrip";
 import { AgentAccordion } from "@/components/AgentAccordion";
 import { TradeJournal } from "@/components/TradeJournal";
 import { WatchlistPage } from "@/components/WatchlistPage";
+import { ChartOverlayToggles } from "@/components/ChartOverlayToggles";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu } from "lucide-react";
 
 const ALL_STAGES = [
@@ -63,6 +64,9 @@ export default function WarRoomDashboard() {
     return ["NQ1", "ES1", "YM1", "RTY1", "GC1", "CL1", "SI1", "ZB1"];
   });
   const [newWatchlistTicker, setNewWatchlistTicker] = useState("");
+
+  // Chart overlay toggles
+  const [showSessions, setShowSessions] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -411,7 +415,12 @@ export default function WarRoomDashboard() {
           {/* ═══ MAIN VIEW: Chart + Signal ═══ */}
           {activeView === "main" && (
             <>
-              <MiniChart chartData={chartData} signal={signal} ticker={ticker} />
+              <div className="flex items-center justify-between mb-2">
+                <ChartOverlayToggles toggles={[
+                  { id: "sessions", label: "Sessions", color: "#a78bfa", active: showSessions, onToggle: () => setShowSessions(s => !s) },
+                ]} />
+              </div>
+              <MiniChart chartData={chartData} signal={signal} ticker={ticker} showSessions={showSessions} />
 
               {signal && <SignalStrip signal={signal} />}
             </>

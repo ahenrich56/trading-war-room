@@ -2,8 +2,9 @@
 
 import { useRef, useState, useEffect } from "react";
 import { SignalPayload } from "./types";
+import { getSessionZones, SessionZone } from "@/lib/sessions";
 
-export function MiniChart({ chartData, signal, ticker }: { chartData: any, signal: SignalPayload | null, ticker: string }) {
+export function MiniChart({ chartData, signal, ticker, showSessions = false }: { chartData: any, signal: SignalPayload | null, ticker: string, showSessions?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const prevTickerRef = useRef<string>("");
@@ -110,6 +111,61 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
     if (chartData.indicators?.ema21?.length) chart.ema21Series.setData(chartData.indicators.ema21);
     if (chartData.indicators?.vwap?.length) chart.vwapSeries.setData(chartData.indicators.vwap);
 
+    // Session zones — clean up old markers, render if toggled on
+    if (chart._sessionMarkers) {
+      try { chart.candleSeries.setMarkers([]); } catch (e) {}
+    }
+    chart._sessionMarkers = false;
+
+    if (showSessions && candleData.length > 0) {
+      const timeframe = chartData.timeframe || "5m";
+      const zones = getSessionZones(candleData, timeframe);
+
+      if (zones.length > 0) {
+        // Use markers at session boundaries for visual labels
+        const markers: any[] = [];
+        const sessionColors: Record<string, string> = {
+          asian: "#8b5cf6",
+          london: "#3b82f6",
+          newyork: "#f97316",
+        };
+
+        // Build background coloring via lightweight-charts markers
+        for (const zone of zones) {
+          if (zone.isKillZone) continue; // Only label main sessions
+          // Find the candle closest to session start
+          const startCandle = candleData.find((c: any) => c.time >= zone.start);
+          if (startCandle) {
+            markers.push({
+              time: startCandle.time,
+              position: "aboveBar",
+              color: sessionColors[zone.type] || "#94a3b8",
+              shape: "square",
+              text: zone.type === "asian" ? "ASIA" : zone.type === "london" ? "LDN" : "NY",
+            });
+          }
+        }
+
+        // Sort markers by time (required by LWC)
+        markers.sort((a: any, b: any) => a.time - b.time);
+
+        // Deduplicate markers at the same timestamp
+        const dedupedMarkers: any[] = [];
+        const seenMarkerTimes = new Set();
+        for (const m of markers) {
+          if (!seenMarkerTimes.has(m.time)) {
+            seenMarkerTimes.add(m.time);
+            dedupedMarkers.push(m);
+          }
+        }
+
+        if (dedupedMarkers.length > 0) {
+          chart.candleSeries.setMarkers(dedupedMarkers);
+          chart._sessionMarkers = true;
+        }
+      }
+    }
+
     // Only scroll to real time on initial load or ticker/timeframe change
     // Respect user's scroll position during 10s polling updates
     const currentTimeframe = chartData.timeframe || "";
@@ -176,7 +232,7 @@ export function MiniChart({ chartData, signal, ticker }: { chartData: any, signa
       }
     }
 
-  }, [lwcLoaded, lwcModule, chartData, signal]);
+  }, [lwcLoaded, lwcModule, chartData, signal, showSessions]);
 
   // Clean up on component unmount
   useEffect(() => {
