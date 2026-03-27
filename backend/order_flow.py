@@ -546,10 +546,11 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
             "volume": round(float(row["Volume"]), 0),
         })
 
-    # Volume heatmap: per-candle volume distributed across price bins
+    # Volume heatmap: per-candle volume distributed across price bins (last 200 bars)
     heatmap_bins = 12  # price divisions per candle
     heatmap = []
-    for _, row in df_delta.iterrows():
+    heatmap_df = df_delta.tail(200)
+    for _, row in heatmap_df.iterrows():
         bar_h = float(row["High"])
         bar_l = float(row["Low"])
         bar_vol = float(row["Volume"])
