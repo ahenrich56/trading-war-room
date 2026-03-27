@@ -67,6 +67,11 @@ export default function WarRoomDashboard() {
 
   // Chart overlay toggles
   const [showSessions, setShowSessions] = useState(false);
+  const [showBubbles, setShowBubbles] = useState(false);
+  const [showDelta, setShowDelta] = useState(false);
+  const [showCVD, setShowCVD] = useState(false);
+  const [showVwapBands, setShowVwapBands] = useState(false);
+  const [showVP, setShowVP] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -418,9 +423,19 @@ export default function WarRoomDashboard() {
               <div className="flex items-center justify-between mb-2">
                 <ChartOverlayToggles toggles={[
                   { id: "sessions", label: "Sessions", color: "#a78bfa", active: showSessions, onToggle: () => setShowSessions(s => !s) },
+                  { id: "bubbles", label: "Big Trades", color: "#22d3ee", active: showBubbles, onToggle: () => setShowBubbles(s => !s) },
+                  { id: "delta", label: "Delta", color: "#c026d3", active: showDelta, onToggle: () => setShowDelta(s => !s) },
+                  { id: "cvd", label: "CVD", color: "#f59e0b", active: showCVD, onToggle: () => setShowCVD(s => !s) },
+                  { id: "vwapBands", label: "VWAP\u00b1", color: "#a78bfa", active: showVwapBands, onToggle: () => setShowVwapBands(s => !s) },
+                  { id: "vp", label: "VP", color: "#f59e0b", active: showVP, onToggle: () => setShowVP(s => !s) },
                 ]} />
               </div>
-              <MiniChart chartData={chartData} signal={signal} ticker={ticker} showSessions={showSessions} />
+              <MiniChart
+                chartData={chartData} signal={signal} ticker={ticker}
+                showSessions={showSessions} showBubbles={showBubbles}
+                showDelta={showDelta} showCVD={showCVD}
+                showVwapBands={showVwapBands} showVP={showVP}
+              />
 
               {signal && <SignalStrip signal={signal} />}
             </>
