@@ -14,6 +14,7 @@ interface MiniChartProps {
   showCVD?: boolean;
   showVwapBands?: boolean;
   showVP?: boolean;
+  compact?: boolean;
 }
 
 export function MiniChart({
@@ -24,6 +25,7 @@ export function MiniChart({
   showCVD = false,
   showVwapBands = false,
   showVP = false,
+  compact = false,
 }: MiniChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -138,7 +140,7 @@ export function MiniChart({
         layout: { background: { color: "transparent" }, textColor: "#94a3b8" },
         grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.03)" } },
         width: containerRef.current.clientWidth,
-        height: 350,
+        height: compact ? 220 : 350,
         crosshair: { mode: 0 },
         rightPriceScale: { borderColor: "rgba(255,255,255,0.1)" },
         timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: true, secondsVisible: false },
@@ -422,7 +424,7 @@ export function MiniChart({
 
   if (!chartData?.candles?.length) {
     return (
-      <div className="h-[350px] flex items-center justify-center text-slate-600">
+      <div className={`${compact ? "h-[220px]" : "h-[350px]"} flex items-center justify-center text-slate-600`}>
         <div className="text-center">
           <div className="text-3xl mb-2">📊</div>
           <div className="text-sm">Run an analysis to load chart data</div>

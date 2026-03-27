@@ -13,7 +13,8 @@ import { AgentAccordion } from "@/components/AgentAccordion";
 import { TradeJournal } from "@/components/TradeJournal";
 import { WatchlistPage } from "@/components/WatchlistPage";
 import { ChartOverlayToggles } from "@/components/ChartOverlayToggles";
-import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu } from "lucide-react";
+import { MultiChartGrid } from "@/components/MultiChartGrid";
+import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid } from "lucide-react";
 
 const ALL_STAGES = [
   "FUNDAMENTAL_ANALYST",
@@ -72,6 +73,7 @@ export default function WarRoomDashboard() {
   const [showCVD, setShowCVD] = useState(false);
   const [showVwapBands, setShowVwapBands] = useState(false);
   const [showVP, setShowVP] = useState(false);
+  const [multiChart, setMultiChart] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -368,6 +370,13 @@ export default function WarRoomDashboard() {
                   <SelectItem value="1h">1h</SelectItem>
                 </SelectContent>
               </Select>
+              <button
+                onClick={() => setMultiChart(m => !m)}
+                className={`h-8 w-8 flex items-center justify-center rounded border transition-all ${multiChart ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-400" : "border-white/20 bg-black/50 text-slate-500 hover:text-slate-300"}`}
+                title="Toggle multi-timeframe view"
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+              </button>
               <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
                 <SelectTrigger className="w-24 bg-black/50 border-white/20 text-xs h-8">
                   <SelectValue placeholder="Risk" />
@@ -430,12 +439,21 @@ export default function WarRoomDashboard() {
                   { id: "vp", label: "VP", color: "#f59e0b", active: showVP, onToggle: () => setShowVP(s => !s) },
                 ]} />
               </div>
-              <MiniChart
-                chartData={chartData} signal={signal} ticker={ticker}
-                showSessions={showSessions} showBubbles={showBubbles}
-                showDelta={showDelta} showCVD={showCVD}
-                showVwapBands={showVwapBands} showVP={showVP}
-              />
+              {multiChart ? (
+                <MultiChartGrid
+                  ticker={ticker} signal={signal}
+                  showSessions={showSessions} showBubbles={showBubbles}
+                  showDelta={showDelta} showCVD={showCVD}
+                  showVwapBands={showVwapBands} showVP={showVP}
+                />
+              ) : (
+                <MiniChart
+                  chartData={chartData} signal={signal} ticker={ticker}
+                  showSessions={showSessions} showBubbles={showBubbles}
+                  showDelta={showDelta} showCVD={showCVD}
+                  showVwapBands={showVwapBands} showVP={showVP}
+                />
+              )}
 
               {signal && <SignalStrip signal={signal} />}
             </>
