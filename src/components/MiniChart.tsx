@@ -870,8 +870,6 @@ export function MiniChart({
           {showCVD && <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-400 inline-block"></span> CVD</span>}
           {showVP && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500/40 border border-amber-500/60 rounded-sm inline-block"></span> VP</span>}
           {showBubbles && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-400/40 rounded-full inline-block"></span> Trades</span>}
-          {showFootprint && <span className="flex items-center gap-1"><span className="text-[8px] font-bold text-green-400">B</span><span className="text-[8px] font-bold text-red-400">S</span> FP</span>}
-          {showHeatmap && <span className="flex items-center gap-1"><span className="w-2 h-2 inline-block rounded-sm" style={{background: "linear-gradient(135deg, #22c55e40, #ef444440)"}}></span> Heat</span>}
           {showLiquidityMap && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-orange-400/40 border border-orange-400/60 rounded-sm inline-block"></span> Liq</span>}
         </div>
       </div>

@@ -77,8 +77,8 @@ export default function WarRoomDashboard() {
   const [showCVD, setShowCVD] = useState(false);
   const [showVwapBands, setShowVwapBands] = useState(false);
   const [showVP, setShowVP] = useState(false);
-  const [showFootprint, setShowFootprint] = useState(false);
-  const [showHeatmap, setShowHeatmap] = useState(false);
+  const showFootprint = false;
+  const showHeatmap = false;
   const [showLiquidityMap, setShowLiquidityMap] = useState(false);
   const [multiChart, setMultiChart] = useState(false);
 
@@ -469,8 +469,6 @@ export default function WarRoomDashboard() {
                   { id: "cvd", label: "CVD", color: "#f59e0b", active: showCVD, onToggle: () => setShowCVD(s => !s) },
                   { id: "vwapBands", label: "VWAP\u00b1", color: "#a78bfa", active: showVwapBands, onToggle: () => setShowVwapBands(s => !s) },
                   { id: "vp", label: "VP", color: "#f59e0b", active: showVP, onToggle: () => setShowVP(s => !s) },
-                  { id: "footprint", label: "Footprint", color: "#10b981", active: showFootprint, onToggle: () => setShowFootprint(s => !s) },
-                  { id: "heatmap", label: "Heatmap", color: "#ef4444", active: showHeatmap, onToggle: () => setShowHeatmap(s => !s) },
                   { id: "liquidityMap", label: "Liquidity", color: "#f97316", active: showLiquidityMap, onToggle: () => setShowLiquidityMap(s => !s) },
                 ]} />
               </div>
