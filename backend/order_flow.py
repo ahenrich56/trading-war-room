@@ -495,28 +495,35 @@ def compute_liquidity_heatmap(df: pd.DataFrame, lookback: int = 50, num_bins: in
     if not swing_points:
         return []
 
-    # ── 2. Auto-clean swept levels ───────────────────────────────
-    # A swing high is swept if any subsequent bar's high exceeded it
-    # A swing low is swept if any subsequent bar's low went below it
-    # We use cumulative max/min from each point forward for O(n) check
-    cum_max_after = np.maximum.accumulate(highs[::-1])[::-1]  # running max from end
-    cum_min_after = np.minimum.accumulate(lows[::-1])[::-1]   # running min from end
+    # ── 2. Auto-clean swept levels (with buffer) ──────────────────
+    # Only invalidate if price moved decisively past the level (> 0.1% buffer)
+    # Always keep the most recent 8 swing points regardless of sweep status
+    cum_max_after = np.maximum.accumulate(highs[::-1])[::-1]
+    cum_min_after = np.minimum.accumulate(lows[::-1])[::-1]
 
     live_swings = []
+    swept_but_recent = []
     for (idx, price, vol, kind) in swing_points:
-        # Check bars *after* this swing (idx+1 onward)
         if idx + 1 >= n:
             live_swings.append((idx, price, vol, kind))
             continue
+        buffer = price * 0.001  # 0.1% buffer before considering "swept"
+        swept = False
         if kind == "high":
-            # Swept if any later bar traded above this swing high
-            if cum_max_after[idx + 1] > price:
-                continue  # stops were triggered, remove
+            swept = cum_max_after[idx + 1] > price + buffer
         else:
-            # Swept if any later bar traded below this swing low
-            if cum_min_after[idx + 1] < price:
-                continue
-        live_swings.append((idx, price, vol, kind))
+            swept = cum_min_after[idx + 1] < price - buffer
+
+        if not swept:
+            live_swings.append((idx, price, vol, kind))
+        else:
+            swept_but_recent.append((idx, price, vol, kind))
+
+    # If too few live swings, add back most recent swept ones
+    if len(live_swings) < 8 and swept_but_recent:
+        swept_but_recent.sort(key=lambda x: x[0], reverse=True)
+        for sp in swept_but_recent[:max(0, 8 - len(live_swings))]:
+            live_swings.append(sp)
 
     if not live_swings:
         return []
