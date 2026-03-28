@@ -246,12 +246,13 @@ export function MiniChart({
     const timeScale = chart.timeScale();
     const candleSeries = chart.candleSeries;
 
-    // Find max volume for normalization
+    // Find max volume for log normalization (avoids outlier dominance)
     let maxVol = 0;
     for (const cell of heatmap) {
       if (cell.vol > maxVol) maxVol = cell.vol;
     }
     if (maxVol === 0) return;
+    const logMax = Math.log(1 + maxVol);
 
     // Dynamic cell width based on candle spacing
     let cellWidth = 10;
@@ -262,7 +263,7 @@ export function MiniChart({
       const x0 = timeScale.timeToCoordinate(c0.time);
       const x1 = timeScale.timeToCoordinate(c1.time);
       if (x0 !== null && x1 !== null) {
-        cellWidth = Math.max(4, Math.abs(x1 - x0) * 0.85);
+        cellWidth = Math.max(6, Math.abs(x1 - x0) * 0.9);
       }
     }
 
@@ -274,8 +275,9 @@ export function MiniChart({
       const yBot = candleSeries.priceToCoordinate(cell.price_low);
       if (yTop === null || yBot === null) continue;
 
-      const intensity = cell.vol / maxVol;
-      const h = Math.max(4, Math.abs(yBot - yTop)); // minimum 4px tall
+      // Log normalization — prevents outlier cells from crushing all others
+      const intensity = Math.log(1 + cell.vol) / logMax;
+      const h = Math.max(5, Math.abs(yBot - yTop));
 
       // Color by buy/sell dominance
       const total = cell.buy + cell.sell || 1;
@@ -289,7 +291,7 @@ export function MiniChart({
         r = 245; g = 158; b = 11;
       }
 
-      const alpha = 0.12 + intensity * 0.50;
+      const alpha = 0.18 + intensity * 0.55;
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
       ctx.fillRect(x - cellWidth / 2, Math.min(yTop, yBot), cellWidth, h);
     }
