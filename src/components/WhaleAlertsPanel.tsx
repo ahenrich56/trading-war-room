@@ -47,7 +47,7 @@ export function WhaleAlertsPanel({ alerts }: { alerts: WhaleAlert[] }) {
           const isSell = alert.alert_type === "panic_distribution";
           
           return (
-            <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded-lg border border-white/5 bg-black/20 hover:border-white/10 transition-all gap-3 group">
+            <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded-xl border border-white/8 bg-white/[0.02] backdrop-blur-sm hover:border-white/12 transition-all gap-3 group">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-xl ${
                   isBuy ? "bg-emerald-500/15 text-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.1)]" : 

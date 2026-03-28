@@ -108,7 +108,7 @@ export function WatchlistPage({
             <div
               key={i}
               onClick={() => { if (!t.error) onSelect(t.ticker); }}
-              className="flex items-center gap-3 px-3 py-2.5 bg-black/30 rounded border border-white/5 hover:border-purple-500/30 hover:bg-purple-500/5 transition-all cursor-pointer"
+              className="flex items-center gap-3 px-3 py-2.5 bg-white/[0.02] backdrop-blur-sm rounded border border-white/5 hover:border-purple-500/30 hover:bg-purple-500/5 transition-all cursor-pointer"
             >
               <span className="text-[10px] text-slate-600 w-6">#{i + 1}</span>
               <div className={`px-1.5 py-0.5 rounded text-[10px] font-black w-16 text-center ${

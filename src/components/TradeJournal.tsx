@@ -50,19 +50,19 @@ export function TradeJournal({ signal, signalHistory }: TradeJournalProps) {
       {/* Stats Row */}
       {outcomesData && (
         <div className="grid grid-cols-4 gap-2">
-          <div className="p-2.5 rounded bg-black/40 border border-white/10 text-center">
+          <div className="p-2.5 rounded bg-white/[0.03] backdrop-blur-md border border-white/10 text-center">
             <div className="text-[9px] text-slate-500 font-bold">TOTAL</div>
             <div className="text-xl font-black text-white">{outcomesData.total || 0}</div>
           </div>
-          <div className="p-2.5 rounded bg-black/40 border border-green-500/20 text-center">
+          <div className="p-2.5 rounded bg-white/[0.03] backdrop-blur-md border border-green-500/20 text-center">
             <div className="text-[9px] text-slate-500 font-bold">WINS</div>
             <div className="text-xl font-black text-green-400">{outcomesData.wins || 0}</div>
           </div>
-          <div className="p-2.5 rounded bg-black/40 border border-red-500/20 text-center">
+          <div className="p-2.5 rounded bg-white/[0.03] backdrop-blur-md border border-red-500/20 text-center">
             <div className="text-[9px] text-slate-500 font-bold">LOSSES</div>
             <div className="text-xl font-black text-red-400">{outcomesData.losses || 0}</div>
           </div>
-          <div className="p-2.5 rounded bg-black/40 border border-cyan-500/20 text-center">
+          <div className="p-2.5 rounded bg-white/[0.03] backdrop-blur-md border border-cyan-500/20 text-center">
             <div className="text-[9px] text-slate-500 font-bold">WIN RATE</div>
             <div className={`text-xl font-black ${(outcomesData.win_rate || 0) >= 50 ? "text-green-400" : "text-red-400"}`}>
               {outcomesData.win_rate || 0}%
@@ -73,7 +73,7 @@ export function TradeJournal({ signal, signalHistory }: TradeJournalProps) {
 
       {/* Report Outcome */}
       {signal && (
-        <div className="p-3 rounded bg-black/40 border border-white/10">
+        <div className="p-3 rounded bg-white/[0.03] backdrop-blur-md border border-white/10">
           <div className="text-[10px] text-slate-400 font-bold mb-2">REPORT: {signal.ticker} {signal.signal}</div>
           <div className="flex gap-2 flex-wrap">
             <Button size="sm" className="bg-green-600 hover:bg-green-500 text-white font-bold text-xs h-7" onClick={() => reportOutcome(signal, "WIN", 2.0)}>
@@ -99,7 +99,7 @@ export function TradeJournal({ signal, signalHistory }: TradeJournalProps) {
           <>
             <div className="text-[10px] text-slate-500 font-bold mt-2 mb-1">REPORTED OUTCOMES</div>
             {outcomesData.outcomes.map((o: any, i: number) => (
-              <div key={`o-${i}`} className="flex items-center gap-3 p-2 bg-black/30 rounded border border-white/5 text-xs">
+              <div key={`o-${i}`} className="flex items-center gap-3 p-2 bg-white/[0.02] backdrop-blur-sm rounded border border-white/5 text-xs">
                 <span className={`font-bold min-w-[40px] ${o.result === "WIN" ? "text-green-400" : "text-red-400"}`}>{o.result}</span>
                 <span className="text-white font-bold">{o.ticker}</span>
                 <span className="text-slate-500">{o.signal}</span>
@@ -116,7 +116,7 @@ export function TradeJournal({ signal, signalHistory }: TradeJournalProps) {
           <>
             <div className="text-[10px] text-slate-500 font-bold mt-3 mb-1">SIGNAL HISTORY</div>
             {signalHistory.map((sig, i) => (
-              <div key={`h-${i}`} className="flex items-center gap-3 p-2 bg-black/30 rounded border border-white/5 text-xs">
+              <div key={`h-${i}`} className="flex items-center gap-3 p-2 bg-white/[0.02] backdrop-blur-sm rounded border border-white/5 text-xs">
                 <span className={`px-1.5 py-0.5 rounded font-black text-[10px] ${
                   sig.signal === "LONG" ? "bg-green-500/20 text-green-400" :
                   sig.signal === "SHORT" ? "bg-red-500/20 text-red-400" :

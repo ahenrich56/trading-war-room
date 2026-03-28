@@ -42,7 +42,7 @@ export function WatchlistPanel({ data, isScanning, onSelect }: { data: any, isSc
           <div
             key={i}
             onClick={() => !t.error && onSelect(t.ticker)}
-            className="flex items-center gap-3 p-2.5 bg-black/40 rounded border border-white/5 hover:border-white/20 transition-all cursor-pointer group"
+            className="flex items-center gap-3 p-2.5 bg-white/[0.03] backdrop-blur-md rounded border border-white/5 hover:border-white/20 transition-all cursor-pointer group"
           >
             {/* Rank */}
             <span className="text-[10px] text-slate-600 w-5">#{i + 1}</span>
@@ -63,7 +63,7 @@ export function WatchlistPanel({ data, isScanning, onSelect }: { data: any, isSc
             <div className="text-slate-300 text-xs w-20">${t.price || "—"}</div>
 
             {/* Score bar */}
-            <div className="flex-1 relative h-4 bg-black/40 rounded overflow-hidden">
+            <div className="flex-1 relative h-4 bg-white/[0.03] backdrop-blur-md rounded overflow-hidden">
               <div
                 className={`absolute top-0 h-full rounded transition-all ${
                   t.score > 0 ? "bg-green-500/40 left-1/2" : "bg-red-500/40 right-1/2"

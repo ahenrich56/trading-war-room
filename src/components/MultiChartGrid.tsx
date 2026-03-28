@@ -70,7 +70,7 @@ export function MultiChartGrid({
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {TIMEFRAMES.map((tf) => (
-          <div key={tf} className="border border-white/5 rounded-lg p-2 bg-black/20">
+          <div key={tf} className="border border-white/8 rounded-xl p-2 bg-white/[0.02] backdrop-blur-sm">
             <div className="text-[10px] text-slate-500 font-bold mb-1 tracking-wider">{tf.toUpperCase()}</div>
             <MiniChart
               chartData={chartDataMap[tf] || null}

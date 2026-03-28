@@ -30,7 +30,7 @@ export function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunni
   return (
     <div>
       {/* Consensus Header */}
-      <div className="flex items-center justify-between mb-4 p-3 rounded bg-black/40 border border-white/10">
+      <div className="flex items-center justify-between mb-4 p-3 rounded-xl bg-white/[0.03] backdrop-blur-md border border-white/8">
         <div>
           <div className="text-xs text-slate-500">MULTI-MODEL CONSENSUS</div>
           <div className={`text-2xl font-black tracking-widest ${consensusColor}`}>{data.consensus}</div>
@@ -47,7 +47,7 @@ export function ConsensusPanel({ data, isRunning, ticker }: { data: any, isRunni
 
       {/* Scoring Context */}
       {data.regime && (
-        <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded bg-black/20 border border-white/5 text-[10px]">
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-white/[0.02] backdrop-blur-sm border border-white/6 text-[10px]">
           <span className="text-slate-500">REGIME</span>
           <span className={`px-1.5 py-0.5 rounded font-bold ${
             data.regime === "LOW_LIQUIDITY" ? "bg-red-500/20 text-red-400" :

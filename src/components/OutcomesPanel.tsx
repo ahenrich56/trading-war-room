@@ -100,7 +100,7 @@ export function OutcomesPanel() {
     <div className="space-y-6">
       {/* Top Stats Section */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-[#111111] border-slate-800">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8">
           <CardContent className="p-6">
             <div className="flex justify-between items-center">
               <div>
@@ -114,7 +114,7 @@ export function OutcomesPanel() {
           </CardContent>
         </Card>
         
-        <Card className="bg-[#111111] border-slate-800">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8">
           <CardContent className="p-6">
             <div className="flex justify-between items-center">
               <div>
@@ -128,7 +128,7 @@ export function OutcomesPanel() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[#111111] border-slate-800">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8">
           <CardContent className="p-6">
             <div className="flex justify-between items-center">
               <div>
@@ -142,7 +142,7 @@ export function OutcomesPanel() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[#111111] border-slate-800">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8">
           <CardContent className="p-6">
             <div className="flex justify-between items-center">
               <div>
@@ -159,7 +159,7 @@ export function OutcomesPanel() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Signals List */}
-        <Card className="bg-[#111111] border-slate-800 flex-1">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8 flex-1">
           <CardHeader>
             <CardTitle className="text-white text-lg flex items-center gap-2">
               Recent AI Signals
@@ -177,7 +177,7 @@ export function OutcomesPanel() {
             ) : (
               <div className="space-y-4">
                 {signals.map((sig, i) => (
-                  <div key={i} className="flex flex-col sm:flex-row items-center justify-between p-4 bg-black/40 border border-slate-800 rounded-lg gap-4">
+                  <div key={i} className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white/[0.03] backdrop-blur-sm border border-white/8 rounded-lg gap-4">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
                       <div className={`p-2 rounded-md ${sig.signal === "LONG" ? "bg-emerald-500/20 text-emerald-500" : sig.signal === "SHORT" ? "bg-rose-500/20 text-rose-500" : "bg-slate-500/20 text-slate-500"}`}>
                         {sig.signal === "LONG" ? <TrendingUp size={20} /> : sig.signal === "SHORT" ? <TrendingDown size={20} /> : <Clock size={20} />}
@@ -224,7 +224,7 @@ export function OutcomesPanel() {
         </Card>
 
         {/* Historic Outcomes List */}
-        <Card className="bg-[#111111] border-slate-800 flex-1">
+        <Card className="bg-white/[0.03] backdrop-blur-md border-white/8 flex-1">
           <CardHeader>
             <CardTitle className="text-white text-lg">Self-Learning History</CardTitle>
             <CardDescription className="text-slate-400">

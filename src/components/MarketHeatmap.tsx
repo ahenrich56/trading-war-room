@@ -17,13 +17,13 @@ function heatColor(pct: number): string {
   const clamped = Math.max(-3, Math.min(3, pct));
   if (clamped > 0) {
     const intensity = Math.min(1, clamped / 2);
-    return `rgba(34, 197, 94, ${0.1 + intensity * 0.35})`;
+    return `rgba(34, 197, 94, ${0.05 + intensity * 0.12})`;
   }
   if (clamped < 0) {
     const intensity = Math.min(1, Math.abs(clamped) / 2);
-    return `rgba(239, 68, 68, ${0.1 + intensity * 0.35})`;
+    return `rgba(239, 68, 68, ${0.05 + intensity * 0.12})`;
   }
-  return "rgba(148, 163, 184, 0.08)";
+  return "rgba(255, 255, 255, 0.03)";
 }
 
 function pctColor(pct: number): string {
@@ -92,8 +92,8 @@ export function MarketHeatmap({ onTickerSelect }: MarketHeatmapProps) {
               <button
                 key={t.ticker}
                 onClick={() => onTickerSelect(t.ticker)}
-                className="relative rounded-lg border border-white/5 p-2.5 text-left transition-all hover:border-white/15 hover:scale-[1.02] active:scale-[0.98]"
-                style={{ backgroundColor: heatColor(t.change_pct) }}
+                className="relative rounded-xl border border-white/8 p-2.5 text-left transition-all hover:border-white/15 hover:scale-[1.02] active:scale-[0.98]"
+                style={{ backgroundColor: heatColor(t.change_pct), backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-white">{t.ticker}</span>

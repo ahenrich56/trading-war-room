@@ -79,7 +79,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
 
   // Price level row helper
   const PriceRow = ({ label, value, color }: { label: string; value: string; color: string }) => (
-    <div className="flex items-center justify-between gap-2 py-1 px-2 rounded bg-black/20 group">
+    <div className="flex items-center justify-between gap-2 py-1 px-2 rounded bg-white/[0.02] group">
       <span className="text-[10px] text-slate-500 font-medium w-8">{label}</span>
       <span className={`text-sm font-semibold tabular-nums ${color}`}>{value}</span>
       <button
@@ -96,7 +96,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
 
   if (isNoTrade) {
     return (
-      <div className="bg-slate-900/80 border border-white/10 rounded-lg p-3 shadow-lg shadow-black/20">
+      <div className="bg-white/[0.03] backdrop-blur-md border border-white/8 rounded-xl p-3 shadow-lg shadow-black/20">
         <div className="flex items-center gap-3">
           <span className="px-3 py-1 rounded font-black text-sm tracking-widest bg-slate-700 text-slate-300">NO TRADE</span>
           <span className="text-xs text-slate-500">Conditions don't support a trade right now</span>
@@ -217,7 +217,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
             { label: "Max Hold", value: signal.max_hold_minutes ? `${signal.max_hold_minutes}m` : "—" },
             { label: "OF Agrees", value: signal.order_flow_agrees === true ? "Yes" : signal.order_flow_agrees === false ? "No" : "—", color: signal.order_flow_agrees === true ? "text-green-400" : signal.order_flow_agrees === false ? "text-red-400" : undefined },
           ].map((m) => (
-            <div key={m.label} className="bg-black/30 rounded px-2 py-1.5 text-center">
+            <div key={m.label} className="bg-white/[0.03] rounded px-2 py-1.5 text-center">
               <div className="text-[9px] text-slate-600 font-medium">{m.label}</div>
               <div className={`text-[11px] font-semibold ${m.color || "text-slate-300"}`}>{m.value}</div>
             </div>
@@ -282,7 +282,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
             <div>
               <h4 className="text-[10px] text-slate-500 font-semibold tracking-wider mb-2">TV Webhook</h4>
               <div className="flex items-center gap-2">
-                <div className="flex-1 bg-black/60 border border-white/10 px-2 py-1 rounded text-[10px] text-cyan-400 break-all truncate">
+                <div className="flex-1 bg-white/[0.04] border border-white/10 px-2 py-1 rounded text-[10px] text-cyan-400 break-all truncate">
                   {signal.tv_alert}
                 </div>
                 <button
