@@ -345,10 +345,13 @@ export function MiniChart({
       window.addEventListener("resize", handleResize);
       chart.cleanupResize = () => window.removeEventListener("resize", handleResize);
 
-      // Redraw bubbles on scroll/zoom
+      // Redraw overlays on scroll/zoom
       // Use ref so scroll handler always calls latest draw functions (avoids stale closures)
+      // requestAnimationFrame ensures chart has finished re-rendering before we read coordinates
+      let rafId = 0;
       chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-        drawOverlaysRef.current();
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => drawOverlaysRef.current());
       });
     }
 
