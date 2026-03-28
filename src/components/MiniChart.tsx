@@ -862,11 +862,16 @@ export function MiniChart({
       <div className="flex items-center gap-3 mb-3">
         <span className="text-xs text-white font-bold">{chartData.ticker || ticker}</span>
         <span className="text-[10px] text-slate-600">{chartData.symbol}</span>
-        <div className="flex gap-3 ml-auto text-[10px]">
+        <div className="flex gap-2 ml-auto text-[10px] flex-wrap justify-end">
           <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 inline-block"></span> EMA 9</span>
           <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-400 inline-block"></span> EMA 21</span>
           <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-400 inline-block" style={{borderTop: "1px dashed"}}></span> VWAP</span>
           {showCVD && <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-400 inline-block"></span> CVD</span>}
+          {showVP && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-500/40 border border-amber-500/60 rounded-sm inline-block"></span> VP</span>}
+          {showBubbles && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-cyan-400/40 rounded-full inline-block"></span> Trades</span>}
+          {showFootprint && <span className="flex items-center gap-1"><span className="text-[8px] font-bold text-green-400">B</span><span className="text-[8px] font-bold text-red-400">S</span> FP</span>}
+          {showHeatmap && <span className="flex items-center gap-1"><span className="w-2 h-2 inline-block rounded-sm" style={{background: "linear-gradient(135deg, #22c55e40, #ef444440)"}}></span> Heat</span>}
+          {showLiquidityMap && <span className="flex items-center gap-1"><span className="w-2 h-2 bg-orange-400/40 border border-orange-400/60 rounded-sm inline-block"></span> Liq</span>}
         </div>
       </div>
       <div className="relative">

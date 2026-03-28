@@ -293,7 +293,7 @@ export default function WarRoomDashboard() {
   return (
     <div className="flex h-screen bg-[#05050A] text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-16 bg-[#0A0A15] border-r border-white/5 flex flex-col items-center py-4 gap-6 z-50 flex-shrink-0">
+      <aside className="w-16 bg-[#0A0A15] border-r border-white/5 hidden sm:flex flex-col items-center py-4 gap-6 z-50 flex-shrink-0">
         <Activity className="h-7 w-7 text-[#4A4A6A] mb-2 hover:text-cyan-400 transition-colors" />
         <div className="flex flex-col gap-4 w-full items-center">
           <button
@@ -447,11 +447,18 @@ export default function WarRoomDashboard() {
         )}
 
         {/* Main scrollable content */}
-        <main className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        <main className="flex-1 overflow-y-auto p-4 pb-20 sm:pb-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
 
           {/* ═══ MAIN VIEW: Chart + Signal ═══ */}
           {activeView === "main" && (
             <>
+              {/* Chart title */}
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-semibold text-slate-400 tracking-wide">{ticker}</span>
+                <span className="text-[10px] text-slate-600">/</span>
+                <span className="text-xs text-slate-500">{timeframe}</span>
+              </div>
+
               <div className="flex items-center justify-between mb-2">
                 <ChartOverlayToggles toggles={[
                   { id: "sessions", label: "Sessions", color: "#a78bfa", active: showSessions, onToggle: () => setShowSessions(s => !s) },
@@ -483,7 +490,25 @@ export default function WarRoomDashboard() {
                 />
               )}
 
-              {signal && <SignalStrip signal={signal} />}
+              {/* Section divider */}
+              {signal && (
+                <div className="flex items-center gap-3 py-1">
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <span className="text-[9px] text-slate-600 font-medium tracking-wider">SIGNAL</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                </div>
+              )}
+
+              {signal && <SignalStrip signal={signal} currentPrice={chartData?.candles?.length ? chartData.candles[chartData.candles.length - 1].close : undefined} />}
+
+              {/* Section divider */}
+              {Object.keys(agentData).length > 0 && (
+                <div className="flex items-center gap-3 py-1">
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <span className="text-[9px] text-slate-600 font-medium tracking-wider">AGENTS</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                </div>
+              )}
             </>
           )}
 
@@ -541,6 +566,26 @@ export default function WarRoomDashboard() {
         )}
       </div>
 
+      {/* Mobile Bottom Tab Bar */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden bg-[#0A0A15]/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around px-2 py-2">
+        {[
+          { view: "main", icon: LayoutDashboard, color: "cyan" },
+          { view: "watchlist", icon: List, color: "purple" },
+          { view: "journal", icon: BookOpen, color: "pink" },
+          { view: "consensus", icon: Users, color: "amber" },
+          { view: "markets", icon: BarChart3, color: "emerald" },
+        ].map(({ view, icon: Icon, color }) => (
+          <button
+            key={view}
+            onClick={() => { setActiveView(view as any); if (view === "consensus" && !consensusData) runConsensus(); }}
+            className={`p-2.5 rounded-xl transition-all ${
+              activeView === view ? `bg-${color}-500/10 text-${color}-400` : "text-[#4A4A6A]"
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

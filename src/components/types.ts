@@ -23,6 +23,7 @@ export interface SignalPayload {
   order_flow_bias?: string;
   mtf_confluence_label?: string;
   mtf_confluence_multiplier?: number;
+  max_hold_minutes?: number;
 }
 
 export interface ConfluenceFactor {
