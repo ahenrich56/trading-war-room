@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Radar, Check, X } from "lucide-react";
+import { Radar, Check, X, ChevronDown } from "lucide-react";
 
 const AGENTS = [
   { key: "FUNDAMENTAL_ANALYST", label: "FUNDAMENTAL", short: "Fundamentals" },
@@ -126,6 +126,13 @@ export function AnalysisHUD({
               {formatTime(elapsed)}
             </div>
           </div>
+          <button
+            onClick={() => { setPhase("exiting"); setTimeout(() => setPhase("done"), 500); }}
+            className="ml-2 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Minimize"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
         </div>
 
         {/* ═══ TIMELINE ═══ */}
