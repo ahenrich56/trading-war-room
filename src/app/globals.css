@@ -170,6 +170,17 @@
   100% { transform: translateX(100%); opacity: 0; }
 }
 
+@media (max-width: 767px) {
+  @keyframes hud-slide-in {
+    0% { transform: translateY(100%); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes hud-slide-out {
+    0% { transform: translateY(0); opacity: 1; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+}
+
 @keyframes text-reveal {
   0% { clip-path: inset(0 100% 0 0); }
   100% { clip-path: inset(0 0 0 0); }

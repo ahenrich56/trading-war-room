@@ -261,9 +261,10 @@ export default function WarRoomDashboard() {
                     setAgentData((prev) => ({ ...prev, [marker]: content.text }));
                   }
 
-                  setCurrentStage(marker);
-                  const stageIndex = ALL_STAGES.indexOf(marker);
-                  if (stageIndex !== -1) {
+                  // Only update currentStage for HUD-visible agents (not ICT/ORDER_FLOW/MTF)
+                  if (ALL_STAGES.includes(marker)) {
+                    setCurrentStage(marker);
+                    const stageIndex = ALL_STAGES.indexOf(marker);
                     setProgress(((stageIndex + 1) / ALL_STAGES.length) * 100);
                   }
                 } catch (e) {

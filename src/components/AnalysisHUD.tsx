@@ -98,14 +98,14 @@ export function AnalysisHUD({
 
   return (
     <div
-      className="fixed z-50 pointer-events-auto right-0 top-[52px] bottom-0 w-[300px] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:h-[45vh] max-md:rounded-t-xl"
+      className="fixed z-50 pointer-events-auto right-0 top-[52px] bottom-0 w-[300px] max-md:inset-0 max-md:top-0 max-md:w-full max-md:h-full"
       style={{
         animation: phase === "exiting"
           ? "hud-slide-out 0.5s ease-in forwards"
           : "hud-slide-in 0.4s ease-out",
       }}
     >
-      <div className="h-full flex flex-col bg-[#06080F]/95 backdrop-blur-xl border-l max-md:border-l-0 max-md:border-t border-cyan-500/15 shadow-[-8px_0_30px_rgba(6,182,212,0.08)] max-md:rounded-t-xl">
+      <div className="h-full flex flex-col bg-[#06080F]/98 backdrop-blur-xl border-l max-md:border-l-0 border-cyan-500/15 shadow-[-8px_0_30px_rgba(6,182,212,0.08)]">
 
         {/* ═══ HEADER ═══ */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
