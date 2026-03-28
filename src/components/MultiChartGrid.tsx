@@ -17,12 +17,13 @@ interface MultiChartGridProps {
   showVP: boolean;
   showFootprint: boolean;
   showHeatmap: boolean;
+  showLiquidityMap: boolean;
 }
 
 export function MultiChartGrid({
   ticker, signal,
   showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP,
-  showFootprint, showHeatmap,
+  showFootprint, showHeatmap, showLiquidityMap,
 }: MultiChartGridProps) {
   const [chartDataMap, setChartDataMap] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
@@ -84,6 +85,7 @@ export function MultiChartGrid({
               showVP={showVP}
               showFootprint={showFootprint}
               showHeatmap={showHeatmap}
+              showLiquidityMap={showLiquidityMap}
             />
           </div>
         ))}
