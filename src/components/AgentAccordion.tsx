@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { ChevronDown, Check, BarChart3, MessageCircle, Newspaper, LineChart, TrendingDown, TrendingUp, Crosshair, Shield } from "lucide-react";
 
 interface AgentAccordionProps {
@@ -22,7 +22,7 @@ const AGENTS = [
 function formatAgentOutput(text: string) {
   if (!text) return null;
   const lines = text.split("\n");
-  const elements: JSX.Element[] = [];
+  const elements: React.ReactNode[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
