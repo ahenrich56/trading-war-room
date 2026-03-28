@@ -158,6 +158,18 @@
   --wr-glow-bear: 0 0 20px rgba(239, 68, 68, 0.3);
   --wr-glow-info: 0 0 20px rgba(6, 182, 212, 0.2);
   --wr-card-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+
+  /* Glass tokens */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: 12px;
+}
+
+/* ═══ Glassmorphism Background ═══ */
+
+@keyframes subtle-drift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
 /* ═══ Signal Card Animations ═══ */

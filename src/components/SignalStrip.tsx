@@ -113,7 +113,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
   return (
     <div className="animate-in slide-in-from-bottom-2 fade-in duration-500">
       <div
-        className={`bg-[#0a0a14] border ${dirBorder} rounded-lg overflow-hidden cursor-pointer transition-all shadow-lg shadow-black/20 ${cardAnimation}`}
+        className={`bg-white/[0.03] backdrop-blur-xl border ${dirBorder} rounded-lg overflow-hidden cursor-pointer transition-all shadow-lg shadow-black/20 ${cardAnimation}`}
         onClick={() => setExpanded(prev => !prev)}
       >
         {/* Color accent bar */}
@@ -227,7 +227,7 @@ export function SignalStrip({ signal, currentPrice }: SignalStripProps) {
 
       {/* ═══ EXPANDED DETAIL ═══ */}
       {expanded && (
-        <div className="mt-1.5 bg-[#0a0a14] border border-white/10 rounded-lg p-4 space-y-4 animate-in slide-in-from-top-2 fade-in duration-300 shadow-lg shadow-black/20">
+        <div className="mt-1.5 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-lg p-4 space-y-4 animate-in slide-in-from-top-2 fade-in duration-300 shadow-lg shadow-black/20">
           {/* Confluence Grid */}
           {signal.confluences && signal.confluences.length > 0 && (
             <div>

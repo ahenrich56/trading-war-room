@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { SignalPayload } from "./types";
 import { getSessionZones } from "@/lib/sessions";
+import { GlassCard } from "@/components/ui/liquid-glass";
 
 interface MiniChartProps {
   chartData: any;
@@ -858,7 +859,7 @@ export function MiniChart({
   }
 
   return (
-    <div>
+    <GlassCard intensity="medium" glow="cyan" className="p-3">
       <div className="flex items-center gap-3 mb-3">
         <span className="text-xs text-white font-bold">{chartData.ticker || ticker}</span>
         <span className="text-[10px] text-slate-600">{chartData.symbol}</span>
@@ -882,6 +883,6 @@ export function MiniChart({
           style={{ width: "100%", height: "100%" }}
         />
       </div>
-    </div>
+    </GlassCard>
   );
 }

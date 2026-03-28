@@ -17,6 +17,7 @@ import { MultiChartGrid } from "@/components/MultiChartGrid";
 import { AlertBell } from "@/components/AlertBell";
 import { MarketHeatmap } from "@/components/MarketHeatmap";
 import { AnalysisHUD } from "@/components/AnalysisHUD";
+import { GlassFilter } from "@/components/ui/liquid-glass";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar } from "lucide-react";
 
 const ALL_STAGES = [
@@ -291,9 +292,10 @@ export default function WarRoomDashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-[#05050A] text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900 overflow-hidden">
+    <div className="flex h-screen text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900 overflow-hidden" style={{ background: "linear-gradient(135deg, #05050A 0%, #0a0f1a 30%, #080510 60%, #05050A 100%)" }}>
+      <GlassFilter />
       {/* Sidebar */}
-      <aside className="w-16 bg-[#0A0A15] border-r border-white/5 hidden sm:flex flex-col items-center py-4 gap-6 z-50 flex-shrink-0">
+      <aside className="w-16 border-r border-white/8 hidden sm:flex flex-col items-center py-4 gap-6 z-50 flex-shrink-0" style={{ background: "rgba(10, 10, 21, 0.6)", backdropFilter: "blur(16px)" }}>
         <Activity className="h-7 w-7 text-[#4A4A6A] mb-2 hover:text-cyan-400 transition-colors" />
         <div className="flex flex-col gap-4 w-full items-center">
           <button
@@ -342,7 +344,7 @@ export default function WarRoomDashboard() {
         <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
 
         {/* Header */}
-        <header className="shrink-0 sticky top-0 z-40 border-b border-white/5 bg-[#05050A]/90 backdrop-blur-md px-4 py-2.5">
+        <header className="shrink-0 sticky top-0 z-40 border-b border-white/8 px-4 py-2.5" style={{ background: "rgba(5, 5, 10, 0.6)", backdropFilter: "blur(16px)" }}>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-extrabold text-white tracking-widest uppercase hidden sm:block">WAR ROOM</h1>
@@ -567,7 +569,7 @@ export default function WarRoomDashboard() {
       </div>
 
       {/* Mobile Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden bg-[#0A0A15]/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around px-2 py-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden border-t border-white/8 flex items-center justify-around px-2 py-2" style={{ background: "rgba(10, 10, 21, 0.7)", backdropFilter: "blur(20px)" }}>
         {[
           { view: "main", icon: LayoutDashboard, color: "cyan" },
           { view: "watchlist", icon: List, color: "purple" },

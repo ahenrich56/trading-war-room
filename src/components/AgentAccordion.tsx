@@ -112,7 +112,7 @@ export function AgentAccordion({ agentData, currentStage }: AgentAccordionProps)
         const Icon = agent.icon;
 
         return (
-          <div key={agent.key} className="border border-white/10 rounded-lg bg-black/30 overflow-hidden shadow-sm shadow-black/10">
+          <div key={agent.key} className="border border-white/8 rounded-xl bg-white/[0.03] backdrop-blur-md overflow-hidden shadow-sm shadow-black/10">
             <button
               onClick={() => setExpandedAgent(isExpanded ? null : agent.key)}
               className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/5 transition-colors"
