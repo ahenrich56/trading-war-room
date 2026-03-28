@@ -479,7 +479,7 @@ Output ONLY valid JSON, no markdown:
     "indicators_used": {{"RSI_14": {primary.get('RSI_14', 'null')}, "MACD_histogram": {primary.get('MACD_histogram', 'null')}, "ATR_14": {primary.get('ATR_14', 'null')}, "ADX": {primary.get('ADX', 'null')}}}
 }}
 """
-        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 900, learning_context=learning_ctx)
+        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 1200, learning_context=learning_ctx)
         clean_json = signal_text.replace("```json", "").replace("```", "").strip()
 
         # Try to extract JSON object if model added surrounding text
@@ -489,9 +489,17 @@ Output ONLY valid JSON, no markdown:
             if match:
                 clean_json = match.group(0)
 
+        # Fix common LLM JSON issues
+        clean_json = clean_json.replace("True", "true").replace("False", "false").replace("None", "null")
+        # Remove trailing commas before } or ]
+        import re
+        clean_json = re.sub(r',\s*([}\]])', r'\1', clean_json)
+
         try:
             signal_data = json.loads(clean_json)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"SIGNAL_ENGINE JSON parse failed: {e}\nRaw (first 500): {signal_text[:500]}")
+            print(f"Cleaned (first 500): {clean_json[:500]}")
             signal_data = {
                 "ticker": ticker,
                 "timestamp_utc": datetime.utcnow().isoformat() + "Z",
