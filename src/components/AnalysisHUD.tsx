@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Radar, Check, X, Zap } from "lucide-react";
+import { Radar, Check, X } from "lucide-react";
 
 const AGENTS = [
   { key: "FUNDAMENTAL_ANALYST", label: "FUNDAMENTAL", short: "Fundamentals" },
@@ -98,14 +98,14 @@ export function AnalysisHUD({
 
   return (
     <div
-      className="fixed right-0 top-[52px] bottom-0 w-[300px] z-50 pointer-events-auto"
+      className="fixed z-50 pointer-events-auto right-0 top-[52px] bottom-0 w-[300px] max-md:inset-x-0 max-md:top-auto max-md:bottom-0 max-md:w-full max-md:h-[45vh] max-md:rounded-t-xl"
       style={{
         animation: phase === "exiting"
           ? "hud-slide-out 0.5s ease-in forwards"
           : "hud-slide-in 0.4s ease-out",
       }}
     >
-      <div className="h-full flex flex-col bg-[#06080F]/95 backdrop-blur-xl border-l border-cyan-500/15 shadow-[-8px_0_30px_rgba(6,182,212,0.08)]">
+      <div className="h-full flex flex-col bg-[#06080F]/95 backdrop-blur-xl border-l max-md:border-l-0 max-md:border-t border-cyan-500/15 shadow-[-8px_0_30px_rgba(6,182,212,0.08)] max-md:rounded-t-xl">
 
         {/* ═══ HEADER ═══ */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
@@ -268,27 +268,7 @@ export function AnalysisHUD({
           </button>
         </div>
 
-        {/* ═══ SIGNAL READY OVERLAY ═══ */}
-        {phase === "completing" && (
-          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-            <div className="absolute inset-0 bg-gradient-radial from-cyan-500/10 to-transparent animate-pulse" />
-            <div className="text-center">
-              <Zap className="h-8 w-8 text-cyan-400 mx-auto mb-2 animate-pulse" />
-              <div
-                className="text-xl font-black text-white tracking-[0.4em]"
-                style={{ animation: "text-reveal 0.8s ease-out forwards" }}
-              >
-                SIGNAL READY
-              </div>
-              <div
-                className="text-[10px] text-cyan-400 mt-1 tracking-[0.2em]"
-                style={{ animation: "text-reveal 0.8s ease-out 0.3s both" }}
-              >
-                {completedCount}/{AGENTS.length} AGENTS COMPLETE
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Completion: all nodes flash then HUD slides out */}
       </div>
     </div>
   );

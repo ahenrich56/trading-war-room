@@ -500,8 +500,8 @@ def calculate_enhanced_score(
     # 6. Grade signal
     grade = _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence)
 
-    # Downgrade direction on F or C grade
-    if grade in ("F", "C"):
+    # Downgrade direction on F grade only (C can still produce signals)
+    if grade == "F":
         direction = "NO_TRADE"
 
     # 7. Build confluences list for frontend

@@ -217,8 +217,8 @@ def _validate_signal(signal_data, signal_grade, structure_levels, atr_val):
     if rr < 1.5:
         overrides.append(f"R:R {rr} < 1.5 minimum")
 
-    # Gate 3: Grade enforcement (defense-in-depth)
-    if signal_grade in ("C", "F"):
+    # Gate 3: Grade enforcement (defense-in-depth) — only F blocks trades
+    if signal_grade == "F":
         overrides.append(f"Grade {signal_grade} requires NO_TRADE")
 
     # Gate 4: SL sanity check
@@ -479,8 +479,15 @@ Output ONLY valid JSON, no markdown:
     "indicators_used": {{"RSI_14": {primary.get('RSI_14', 'null')}, "MACD_histogram": {primary.get('MACD_histogram', 'null')}, "ATR_14": {primary.get('ATR_14', 'null')}, "ADX": {primary.get('ADX', 'null')}}}
 }}
 """
-        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 600, learning_context=learning_ctx)
+        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 900, learning_context=learning_ctx)
         clean_json = signal_text.replace("```json", "").replace("```", "").strip()
+
+        # Try to extract JSON object if model added surrounding text
+        if not clean_json.startswith("{"):
+            import re
+            match = re.search(r'\{[\s\S]*\}', clean_json)
+            if match:
+                clean_json = match.group(0)
 
         try:
             signal_data = json.loads(clean_json)
