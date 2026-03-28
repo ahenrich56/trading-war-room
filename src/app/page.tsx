@@ -78,6 +78,7 @@ export default function WarRoomDashboard() {
   const [showVP, setShowVP] = useState(false);
   const [showFootprint, setShowFootprint] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showLiquidityMap, setShowLiquidityMap] = useState(false);
   const [multiChart, setMultiChart] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -461,6 +462,7 @@ export default function WarRoomDashboard() {
                   { id: "vp", label: "VP", color: "#f59e0b", active: showVP, onToggle: () => setShowVP(s => !s) },
                   { id: "footprint", label: "Footprint", color: "#10b981", active: showFootprint, onToggle: () => setShowFootprint(s => !s) },
                   { id: "heatmap", label: "Heatmap", color: "#ef4444", active: showHeatmap, onToggle: () => setShowHeatmap(s => !s) },
+                  { id: "liquidityMap", label: "Liquidity", color: "#f97316", active: showLiquidityMap, onToggle: () => setShowLiquidityMap(s => !s) },
                 ]} />
               </div>
               {multiChart ? (
@@ -469,7 +471,7 @@ export default function WarRoomDashboard() {
                   showSessions={showSessions} showBubbles={showBubbles}
                   showDelta={showDelta} showCVD={showCVD}
                   showVwapBands={showVwapBands} showVP={showVP}
-                  showFootprint={showFootprint} showHeatmap={showHeatmap}
+                  showFootprint={showFootprint} showHeatmap={showHeatmap} showLiquidityMap={showLiquidityMap}
                 />
               ) : (
                 <MiniChart
@@ -477,7 +479,7 @@ export default function WarRoomDashboard() {
                   showSessions={showSessions} showBubbles={showBubbles}
                   showDelta={showDelta} showCVD={showCVD}
                   showVwapBands={showVwapBands} showVP={showVP}
-                  showFootprint={showFootprint} showHeatmap={showHeatmap}
+                  showFootprint={showFootprint} showHeatmap={showHeatmap} showLiquidityMap={showLiquidityMap}
                 />
               )}
 

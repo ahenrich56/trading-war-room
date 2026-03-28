@@ -16,6 +16,7 @@ interface MiniChartProps {
   showVP?: boolean;
   showFootprint?: boolean;
   showHeatmap?: boolean;
+  showLiquidityMap?: boolean;
   compact?: boolean;
 }
 
@@ -29,6 +30,7 @@ export function MiniChart({
   showVP = false,
   showFootprint = false,
   showHeatmap = false,
+  showLiquidityMap = false,
   compact = false,
 }: MiniChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -199,20 +201,34 @@ export function MiniChart({
       const buyK = fp.buy_vol >= 1000 ? `${(fp.buy_vol / 1000).toFixed(0)}K` : `${Math.round(fp.buy_vol)}`;
       const sellK = fp.sell_vol >= 1000 ? `${(fp.sell_vol / 1000).toFixed(0)}K` : `${Math.round(fp.sell_vol)}`;
 
-      // Buy vol above candle high (green with dark bg)
+      // Imbalance detection (buy vol >> sell vol or vice versa)
+      const imbalanceBuy = fp.imbalance === "buy";
+      const imbalanceSell = fp.imbalance === "sell";
+
+      // Buy vol above candle high (green with dark bg, highlighted on imbalance)
       const buyY = yTop - fontSize * 0.8;
       const buyW = ctx.measureText(buyK).width + 4;
-      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillStyle = imbalanceBuy ? "rgba(34, 197, 94, 0.25)" : "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(x - buyW / 2, buyY - fontSize / 2 - 1, buyW, fontSize + 2);
-      ctx.fillStyle = "#22c55e";
+      if (imbalanceBuy) {
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - buyW / 2, buyY - fontSize / 2 - 1, buyW, fontSize + 2);
+      }
+      ctx.fillStyle = imbalanceBuy ? "#4ade80" : "#22c55e";
       ctx.fillText(buyK, x, buyY);
 
-      // Sell vol below candle low (red with dark bg)
+      // Sell vol below candle low (red with dark bg, highlighted on imbalance)
       const sellY = yBot + fontSize * 0.8;
       const sellW = ctx.measureText(sellK).width + 4;
-      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillStyle = imbalanceSell ? "rgba(239, 68, 68, 0.25)" : "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(x - sellW / 2, sellY - fontSize / 2 - 1, sellW, fontSize + 2);
-      ctx.fillStyle = "#ef4444";
+      if (imbalanceSell) {
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - sellW / 2, sellY - fontSize / 2 - 1, sellW, fontSize + 2);
+      }
+      ctx.fillStyle = imbalanceSell ? "#f87171" : "#ef4444";
       ctx.fillText(sellK, x, sellY);
 
       // Delta % in center of body if enough room
@@ -296,6 +312,166 @@ export function MiniChart({
       ctx.fillRect(x - cellWidth / 2, Math.min(yTop, yBot), cellWidth, h);
     }
   }, [chartData, showHeatmap]);
+
+  // ── Draw liquidity heatmap (projected stop-loss zones from swing highs/lows) ──
+  const drawLiquidityHeatmap = useCallback(() => {
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    if (!chart || !canvas || !showLiquidityMap || !chartData?.order_flow?.liquidity_heatmap?.length) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const liqData = chartData.order_flow.liquidity_heatmap;
+    const candleSeries = chart.candleSeries;
+
+    // Find max liquidity for normalization
+    let maxLiq = 0;
+    for (const cell of liqData) {
+      if (cell.liquidity > maxLiq) maxLiq = cell.liquidity;
+    }
+    if (maxLiq === 0) return;
+    const logMax = Math.log(1 + maxLiq);
+
+    // Get chart visible area
+    const chartWidth = canvas.width;
+
+    for (const cell of liqData) {
+      const yTop = candleSeries.priceToCoordinate(cell.price_high);
+      const yBot = candleSeries.priceToCoordinate(cell.price_low);
+      if (yTop === null || yBot === null) continue;
+
+      const intensity = Math.log(1 + cell.liquidity) / logMax;
+      if (intensity < 0.05) continue; // skip negligible levels
+
+      const h = Math.max(3, Math.abs(yBot - yTop));
+      const barWidth = intensity * chartWidth * 0.35; // max 35% of chart width
+
+      // Color: green below price (buy-stop fuel), blue above (sell-stop fuel), orange for POC
+      let r: number, g: number, b: number;
+      if (cell.poc) {
+        r = 255; g = 165; b = 0; // orange POC "magnet"
+      } else if (cell.side === "buy") {
+        r = 34; g = 197; b = 94; // green — buy stops below
+      } else {
+        r = 59; g = 130; b = 246; // blue — sell stops above
+      }
+
+      const alpha = 0.08 + intensity * 0.35;
+
+      // Draw from right edge inward (profile style)
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      ctx.fillRect(chartWidth - barWidth, Math.min(yTop, yBot), barWidth, h);
+
+      // POC gets a border highlight
+      if (cell.poc) {
+        ctx.strokeStyle = `rgba(255, 165, 0, ${0.4 + intensity * 0.4})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(chartWidth - barWidth, Math.min(yTop, yBot), barWidth, h);
+      }
+    }
+  }, [chartData, showLiquidityMap]);
+
+  // ── Draw volume profile as canvas histogram (right side) ──
+  const drawVolumeProfileCanvas = useCallback(() => {
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    if (!chart || !canvas || !showVP || !chartData?.order_flow?.volume_profile?.levels?.length) {
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const vp = chartData.order_flow.volume_profile;
+    const levels = vp.levels;
+    const candleSeries = chart.candleSeries;
+    const chartWidth = canvas.width;
+
+    // Find max volume for normalization
+    let maxVol = 0;
+    for (const level of levels) {
+      if (level.volume > maxVol) maxVol = level.volume;
+    }
+    if (maxVol === 0) return;
+
+    for (const level of levels) {
+      const yTop = candleSeries.priceToCoordinate(level.bin_high);
+      const yBot = candleSeries.priceToCoordinate(level.bin_low);
+      if (yTop === null || yBot === null) continue;
+
+      const h = Math.max(2, Math.abs(yBot - yTop) - 1);
+      const ratio = level.volume / maxVol;
+      const barWidth = ratio * chartWidth * 0.2; // max 20% of chart width
+
+      // Buy portion (green) and sell portion (red) stacked
+      const total = level.buy_vol + level.sell_vol || 1;
+      const buyFrac = level.buy_vol / total;
+      const buyWidth = barWidth * buyFrac;
+      const sellWidth = barWidth - buyWidth;
+
+      const isPOC = Math.abs(level.price - vp.poc) < (level.bin_high - level.bin_low);
+      const inVA = level.price >= vp.val && level.price <= vp.vah;
+
+      const baseAlpha = isPOC ? 0.6 : inVA ? 0.35 : 0.2;
+
+      // Sell (red) from right edge
+      ctx.fillStyle = `rgba(239, 68, 68, ${baseAlpha})`;
+      ctx.fillRect(chartWidth - barWidth, Math.min(yTop, yBot), sellWidth, h);
+
+      // Buy (green) next to sell
+      ctx.fillStyle = `rgba(34, 197, 94, ${baseAlpha})`;
+      ctx.fillRect(chartWidth - barWidth + sellWidth, Math.min(yTop, yBot), buyWidth, h);
+
+      // POC highlight line
+      if (isPOC) {
+        ctx.strokeStyle = "rgba(245, 158, 11, 0.8)";
+        ctx.lineWidth = 1.5;
+        const yMid = (Math.min(yTop, yBot) + Math.max(yTop, yBot)) / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, yMid);
+        ctx.lineTo(chartWidth, yMid);
+        ctx.stroke();
+
+        // POC label
+        ctx.font = "bold 9px JetBrains Mono, monospace";
+        ctx.fillStyle = "#f59e0b";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`POC ${vp.poc}`, chartWidth - barWidth - 4, yMid);
+      }
+
+      // VA boundary lines
+      if (Math.abs(level.bin_high - vp.vah) < (level.bin_high - level.bin_low)) {
+        const yLine = candleSeries.priceToCoordinate(vp.vah);
+        if (yLine !== null) {
+          ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(0, yLine);
+          ctx.lineTo(chartWidth, yLine);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      if (Math.abs(level.bin_low - vp.val) < (level.bin_high - level.bin_low)) {
+        const yLine = candleSeries.priceToCoordinate(vp.val);
+        if (yLine !== null) {
+          ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(0, yLine);
+          ctx.lineTo(chartWidth, yLine);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    }
+  }, [chartData, showVP]);
 
   // Render chart when data arrives
   useEffect(() => {
@@ -581,10 +757,10 @@ export function MiniChart({
 
     // Draw bubbles after chart data is set
     // Keep the ref updated so scroll/resize always call latest draw functions
-    drawOverlaysRef.current = () => { clearCanvas(); drawHeatmap(); drawBubbles(); drawFootprint(); };
+    drawOverlaysRef.current = () => { clearCanvas(); drawHeatmap(); drawLiquidityHeatmap(); drawVolumeProfileCanvas(); drawBubbles(); drawFootprint(); };
     requestAnimationFrame(drawOverlaysRef.current);
 
-  }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, showFootprint, showHeatmap, clearCanvas, drawBubbles, drawFootprint, drawHeatmap]);
+  }, [lwcLoaded, lwcModule, chartData, signal, showSessions, showBubbles, showDelta, showCVD, showVwapBands, showVP, showFootprint, showHeatmap, showLiquidityMap, clearCanvas, drawBubbles, drawFootprint, drawHeatmap, drawLiquidityHeatmap, drawVolumeProfileCanvas]);
 
   // ── WebSocket live price streaming ──
   const wsRef = useRef<WebSocket | null>(null);

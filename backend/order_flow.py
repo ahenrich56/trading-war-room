@@ -452,6 +452,156 @@ def compute_vwap_bands(df: pd.DataFrame) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
+#  LIQUIDITY HEATMAP
+# ═══════════════════════════════════════════════════════════
+
+def compute_liquidity_heatmap(df: pd.DataFrame, lookback: int = 50, num_bins: int = 30) -> list:
+    """
+    Compute a liquidity heatmap by projecting resting stop-loss clusters
+    above swing highs (buy-stop liquidity) and below swing lows (sell-stop
+    liquidity).
+
+    Levels are weighted by recency and volume, with gaussian bleed into
+    nearby price bins.  Swept levels (price traded through them) are
+    auto-invalidated so only *live* liquidity remains.
+
+    Returns a list of dicts:
+        {"price_low", "price_high", "liquidity", "side": "buy"|"sell", "poc": bool}
+    """
+    if df.empty or len(df) < lookback:
+        return []
+
+    # Work on the tail to keep things bounded
+    work = df.tail(max(lookback * 4, 200)).copy()
+    n = len(work)
+
+    highs = work["High"].values
+    lows = work["Low"].values
+    volumes = work["Volume"].values
+
+    # ── 1. Identify swing highs / lows (±5 bar window) ──────────
+    swing_window = 5
+    swing_points = []  # (index_in_work, price, volume, "high"|"low")
+
+    for i in range(swing_window, n - swing_window):
+        local_highs = highs[i - swing_window: i + swing_window + 1]
+        local_lows = lows[i - swing_window: i + swing_window + 1]
+
+        if highs[i] == local_highs.max() and highs[i] != local_highs.min():
+            swing_points.append((i, float(highs[i]), float(volumes[i]), "high"))
+        if lows[i] == local_lows.min() and lows[i] != local_lows.max():
+            swing_points.append((i, float(lows[i]), float(volumes[i]), "low"))
+
+    if not swing_points:
+        return []
+
+    # ── 2. Auto-clean swept levels ───────────────────────────────
+    # A swing high is swept if any subsequent bar's high exceeded it
+    # A swing low is swept if any subsequent bar's low went below it
+    # We use cumulative max/min from each point forward for O(n) check
+    cum_max_after = np.maximum.accumulate(highs[::-1])[::-1]  # running max from end
+    cum_min_after = np.minimum.accumulate(lows[::-1])[::-1]   # running min from end
+
+    live_swings = []
+    for (idx, price, vol, kind) in swing_points:
+        # Check bars *after* this swing (idx+1 onward)
+        if idx + 1 >= n:
+            live_swings.append((idx, price, vol, kind))
+            continue
+        if kind == "high":
+            # Swept if any later bar traded above this swing high
+            if cum_max_after[idx + 1] > price:
+                continue  # stops were triggered, remove
+        else:
+            # Swept if any later bar traded below this swing low
+            if cum_min_after[idx + 1] < price:
+                continue
+        live_swings.append((idx, price, vol, kind))
+
+    if not live_swings:
+        return []
+
+    # ── 3. Create price grid ─────────────────────────────────────
+    price_min = float(lows.min())
+    price_max = float(highs.max())
+    price_range = price_max - price_min
+
+    if price_range == 0:
+        return []
+
+    bin_size = price_range / num_bins
+    # Pre-compute bin edges
+    bin_lows = np.array([price_min + i * bin_size for i in range(num_bins)])
+    bin_highs = bin_lows + bin_size
+    bin_mids = (bin_lows + bin_highs) / 2.0
+
+    # Accumulators per bin, split by side
+    buy_liquidity = np.zeros(num_bins, dtype=np.float64)
+    sell_liquidity = np.zeros(num_bins, dtype=np.float64)
+
+    # ── 4. Accumulate liquidity scores (gaussian-weighted) ───────
+    sigma_bins = 2.0
+    avg_vol = float(np.mean(volumes)) if np.mean(volumes) > 0 else 1.0
+    max_idx = n - 1
+
+    for (idx, price, vol, kind) in live_swings:
+        # Recency weight: linear decay, most recent = 1.0, oldest = 0.1
+        recency = 0.1 + 0.9 * (idx / max_idx) if max_idx > 0 else 1.0
+        # Volume weight normalised to average
+        vol_weight = vol / avg_vol
+
+        # Which bin does this swing price fall into?
+        center_bin = int((price - price_min) / bin_size)
+        center_bin = min(center_bin, num_bins - 1)
+
+        # Gaussian spread: only need to touch bins within ±3σ
+        spread = int(3 * sigma_bins) + 1
+        lo = max(0, center_bin - spread)
+        hi = min(num_bins, center_bin + spread + 1)
+
+        bin_indices = np.arange(lo, hi)
+        distances = bin_indices - center_bin
+        gauss_weights = np.exp(-0.5 * (distances / sigma_bins) ** 2)
+
+        score = vol_weight * recency * gauss_weights
+
+        if kind == "high":
+            # Buy-stop liquidity sits above swing highs
+            buy_liquidity[lo:hi] += score
+        else:
+            # Sell-stop liquidity sits below swing lows
+            sell_liquidity[lo:hi] += score
+
+    # ── 5. Build result list ─────────────────────────────────────
+    combined = buy_liquidity + sell_liquidity
+    poc_bin = int(np.argmax(combined)) if combined.max() > 0 else -1
+
+    result = []
+    for i in range(num_bins):
+        total = float(combined[i])
+        if total < 1e-9:
+            continue  # skip empty bins
+
+        # Determine dominant side
+        if buy_liquidity[i] > sell_liquidity[i]:
+            side = "buy"
+        elif sell_liquidity[i] > buy_liquidity[i]:
+            side = "sell"
+        else:
+            side = "buy"  # tie-break
+
+        result.append({
+            "price_low": round(float(bin_lows[i]), 2),
+            "price_high": round(float(bin_highs[i]), 2),
+            "liquidity": round(total, 4),
+            "side": side,
+            "poc": i == poc_bin,
+        })
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
 #  MASTER SUMMARY FUNCTION
 # ═══════════════════════════════════════════════════════════
 
@@ -503,6 +653,9 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
     # Stacked Imbalances
     stacked_imbalances = detect_stacked_imbalance(df)
 
+    # Liquidity Heatmap (projected stop-loss zones from swing highs/lows)
+    liquidity_heatmap = compute_liquidity_heatmap(df)
+
     # VWAP Bands
     vwap_bands = compute_vwap_bands(df)
 
@@ -537,13 +690,21 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
     # Footprint data: buy/sell volume per candle for footprint overlay
     footprint = []
     for idx, row in df_delta.iterrows():
+        buy_v = float(row["buy_vol"])
+        sell_v = float(row["sell_vol"])
+        imbalance = None
+        if sell_v > 0 and buy_v / sell_v > 3.0:
+            imbalance = "buy"
+        elif buy_v > 0 and sell_v / buy_v > 3.0:
+            imbalance = "sell"
         footprint.append({
             "time": int(idx.timestamp()),
-            "buy_vol": round(float(row["buy_vol"]), 0),
-            "sell_vol": round(float(row["sell_vol"]), 0),
+            "buy_vol": round(buy_v, 0),
+            "sell_vol": round(sell_v, 0),
             "delta": round(float(row["delta"]), 0),
             "delta_pct": round(float(row["delta_pct"]), 1),
             "volume": round(float(row["Volume"]), 0),
+            "imbalance": imbalance,
         })
 
     # Volume heatmap: per-candle volume distributed across price bins (last 200 bars)
@@ -595,6 +756,7 @@ def compute_order_flow_summary(df: pd.DataFrame) -> dict:
         "volume_profile": volume_profile,
         "footprint": footprint,
         "heatmap": heatmap,
+        "liquidity_heatmap": liquidity_heatmap,
         "divergences": divergences,
         "absorptions": absorptions,
         "stacked_imbalances": stacked_imbalances,
