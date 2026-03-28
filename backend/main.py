@@ -587,6 +587,7 @@ async def get_chart_data(req: ChartDataRequest):
                 "vwap_bands": of_data.get("vwap_bands", {}),
                 "footprint": of_data.get("footprint", []),
                 "heatmap": of_data.get("heatmap", []),
+                "liquidity_heatmap": of_data.get("liquidity_heatmap", []),
             } if of_data else {}
         }
     except Exception as e:
@@ -667,6 +668,7 @@ async def chart_data_endpoint(request: ChartRequest):
                 "vwap_bands": of_data.get("vwap_bands", {}),
                 "footprint": of_data.get("footprint", []),
                 "heatmap": of_data.get("heatmap", []),
+                "liquidity_heatmap": of_data.get("liquidity_heatmap", []),
                 "summary": of_data.get("summary", {}),
             } if of_data else {},
             "ticker": ticker,
