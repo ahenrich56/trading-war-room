@@ -448,7 +448,7 @@ ENHANCED STRATEGY SCORING (5-Factor Confluence):
 
 RULES:
 - YOUR FINAL SIGNAL MUST EXACTLY MATCH THE STRATEGY DIRECTION ({strat_dir}).
-- IF SIGNAL GRADE IS 'F' OR 'C', USE 'NO_TRADE'.
+- IF SIGNAL GRADE IS 'F', USE 'NO_TRADE'. Grade C may still produce cautious trades.
 - IF THE RISK IS TOO HIGH OR CONTEXT IS BAD, YOU MAY DOWNGRADE TO 'NO_TRADE'.
 - YOU MAY NEVER CALL A 'LONG' IF THE STRATEGY IS 'SHORT', OR VICE VERSA.
 - Confidence MUST be >= 25 for any trade signal (LONG/SHORT). If unsure, use NO_TRADE.
@@ -880,7 +880,7 @@ Market Regime: {scan.get('regime', 'N/A')}
 Order Flow Bias: {scan.get('order_flow_bias', 'NEUTRAL')}
 
 IMPORTANT: The 5-factor confluence system has already scored this setup.
-If signal grade is F or C, or regime is LOW_LIQUIDITY, you should vote NO_TRADE.
+If signal grade is F, you should vote NO_TRADE. Grade C can still produce cautious trades.
 Your vote should be consistent with the strategy direction and grade above.
 
 Output JSON: {{"signal":"LONG|SHORT|NO_TRADE","confidence":0-100,"entry":{scan['price']},"stop_loss":0,"take_profit":0,"reason":"string"}}

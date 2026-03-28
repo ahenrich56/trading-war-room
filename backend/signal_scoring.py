@@ -352,8 +352,8 @@ def _apply_hard_gates(adx, volume_ratio, atr, direction):
     if adx is not None and adx < 15:
         return True, f"ADX={adx:.1f} < 15 — no tradeable trend"
 
-    if volume_ratio is not None and volume_ratio < 0.3:
-        return True, f"Volume ratio={volume_ratio:.1f}x < 0.3 — insufficient liquidity"
+    if volume_ratio is not None and volume_ratio < 0.1:
+        return True, f"Volume ratio={volume_ratio:.1f}x < 0.1 — insufficient liquidity"
 
     return False, ""
 
@@ -371,7 +371,7 @@ def _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_diverg
     abs_score = abs(weighted_score)
 
     if has_divergence and not order_flow_agrees:
-        return "F"
+        return "C"  # Mixed signals, not a total failure
 
     if factors_aligned >= 4 and abs_score > 50 and order_flow_agrees:
         return "A+"
@@ -493,9 +493,7 @@ def calculate_enhanced_score(
     elif direction == "SHORT" and of_score > 20:
         order_flow_agrees = False
 
-    # If order flow strongly contradicts, downgrade to NO_TRADE
-    if not order_flow_agrees and abs(of_score) > 40:
-        direction = "NO_TRADE"
+    # Order flow contradiction is reflected in grade, not as a hard block
 
     # 6. Grade signal
     grade = _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence)
