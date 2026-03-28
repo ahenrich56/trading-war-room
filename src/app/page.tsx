@@ -16,7 +16,8 @@ import { ChartOverlayToggles } from "@/components/ChartOverlayToggles";
 import { MultiChartGrid } from "@/components/MultiChartGrid";
 import { AlertBell } from "@/components/AlertBell";
 import { MarketHeatmap } from "@/components/MarketHeatmap";
-import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3 } from "lucide-react";
+import { AnalysisHUD } from "@/components/AnalysisHUD";
+import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar } from "lucide-react";
 
 const ALL_STAGES = [
   "FUNDAMENTAL_ANALYST",
@@ -401,33 +402,41 @@ export default function WarRoomDashboard() {
               <Button
                 onClick={runAnalysis}
                 disabled={isRunning}
-                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs h-8 shadow-[0_0_15px_rgba(6,182,212,0.4)] hover:shadow-[0_0_25px_rgba(6,182,212,0.6)] transition-all border border-cyan-400/30"
+                className={`relative overflow-hidden text-white font-extrabold text-xs h-8 transition-all border ${
+                  isRunning
+                    ? "bg-cyan-900/30 border-cyan-400/40 shadow-[0_0_20px_rgba(6,182,212,0.5)] cursor-wait"
+                    : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-[0_0_15px_rgba(6,182,212,0.4)] hover:shadow-[0_0_25px_rgba(6,182,212,0.6)] border-cyan-400/30"
+                }`}
               >
-                {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
+                {isRunning && (
+                  <span
+                    className="absolute inset-[-2px] rounded-md opacity-80"
+                    style={{
+                      background: "conic-gradient(from 0deg, transparent 60%, #06b6d4 100%)",
+                      animation: "scan-sweep 1.5s linear infinite",
+                    }}
+                  />
+                )}
+                {isRunning && <span className="absolute inset-[2px] rounded bg-slate-950/90" />}
+                <span className="relative z-10 flex items-center gap-2">
+                  {isRunning && <Radar className="h-3 w-3 animate-spin [animation-duration:2s]" />}
+                  {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
+                </span>
               </Button>
-              {isRunning && (
-                <Button
-                  onClick={cancelAnalysis}
-                  variant="outline"
-                  className="bg-black/50 border-red-500/50 text-red-500 hover:bg-red-500/20 font-bold text-xs h-8 flex items-center gap-1"
-                >
-                  <X className="h-3 w-3" /> STOP
-                </Button>
-              )}
               <AlertBell onTickerSelect={(t) => { setTicker(t); setActiveView("main"); }} />
             </div>
           </div>
         </header>
 
-        {/* Progress Bar */}
-        {isRunning && (
-          <div className="shrink-0 px-4 py-1.5 bg-black/40 border-b border-white/5 flex items-center gap-3">
-            <span className="text-[10px] text-cyan-500 w-40 truncate flex-shrink-0">
-              {currentStage ? `[${currentStage}]` : "INITIALIZING..."}
-            </span>
-            <Progress value={progress} className="h-1 bg-white/10 [&>div]:bg-cyan-500 flex-1" />
-          </div>
-        )}
+        {/* Analysis HUD — slides in from right during analysis */}
+        <AnalysisHUD
+          isRunning={isRunning}
+          currentStage={currentStage}
+          agentData={agentData}
+          ticker={ticker}
+          progress={progress}
+          onCancel={cancelAnalysis}
+        />
 
         {error && (
           <div className="shrink-0 mx-4 mt-2 p-3 border border-red-500/50 bg-red-500/10 text-red-400 rounded text-xs">
