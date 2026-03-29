@@ -1,0 +1,50 @@
+{
+  "bull_market": {
+    "total_trades": 14,
+    "winning_trades": 4,
+    "losing_trades": 10,
+    "win_rate": 0.2857142857142857,
+    "total_pnl": 565.463962338882,
+    "avg_return": 0.8078056604841172,
+    "best_trade": 200.0,
+    "worst_trade": -25.0,
+    "max_drawdown": -100.0,
+    "sharpe_ratio": 6.346883104721519
+  },
+  "bear_market": {
+    "total_trades": 6,
+    "winning_trades": 1,
+    "losing_trades": 5,
+    "win_rate": 0.16666666666666666,
+    "total_pnl": -70.19601754687568,
+    "avg_return": -0.23398672515625227,
+    "best_trade": 35.05623286145908,
+    "worst_trade": -25.0,
+    "max_drawdown": -105.25225040833476,
+    "sharpe_ratio": -8.592940982634536
+  },
+  "liquidity_crunch": {
+    "total_trades": 14,
+    "winning_trades": 4,
+    "losing_trades": 10,
+    "win_rate": 0.2857142857142857,
+    "total_pnl": 310.52019520034105,
+    "avg_return": 0.44360027885763015,
+    "best_trade": 200.0,
+    "worst_trade": -35.0,
+    "max_drawdown": -140.0,
+    "sharpe_ratio": 3.719441487826857
+  },
+  "long_term_sim": {
+    "total_trades": 68,
+    "winning_trades": 21,
+    "losing_trades": 47,
+    "win_rate": 0.3088235294117647,
+    "total_pnl": 2293.064938340587,
+    "avg_return": 0.6744308642178197,
+    "best_trade": 200.0,
+    "worst_trade": -25.0,
+    "max_drawdown": -219.072075322236,
+    "sharpe_ratio": 5.722785544638125
+  }
+}

@@ -1,0 +1,12 @@
+=== Service ===
+active
+
+
+=== Health API (Local) ===
+{"status": "ok", "paper_mode": true}
+
+=== Status API (Local) ===
+{"bot": {"paper_mode": true, "auto_trader_enabled": true, "strategy": "aggressive", "tp_mult": 3.0, "sl_pct": 0.4, "max_positions": 3}, "trader": {"bankroll": "0.0700 SOL", "total_pnl": "+0.0000 SOL", "daily_pnl": "+0.0000 SOL", "total_trades": 0, "wins": 0, "losses": 0, "win_rate": "0.0%", "open_positions": 0, "max_drawdown": "0.0%", "paper_mode": true}, "scanner": {"tokens_seen": 4, "tokens_passed": 0, "tokens_rejected": 2, "pass_rate": "0.0%"}, "whale_intel": {"tracked_whales": 0, "alerts_1h"
+
+=== Remote Accessibility ===
+Direct connection: FAILED (HTTPConnectionPool(host='31.97.128.136', port=4000): Max retries exceeded with url: /api/health (Caused by ConnectTimeoutError(<HTTPConnection(host='31.97.128.136', port=4000) at 0x1a11c35cad0>, 'Connection to 31.97.128.136 timed out. (connect timeout=10)')))

@@ -1,0 +1,84 @@
+
+=== Python version ===
+STDERR: bash: line 1: python3.11: command not found
+
+
+=== Bot service status ===
+active
+
+
+=== Bot log (last 30 lines) ===
+2026-03-25 20:50:56,424 [Scanner     ] INFO    New token: anyone else discord down lol (discord) | 2puJpGVxQ9RY... | Dev: DK8xiZ4yNgWz...
+2026-03-25 20:50:56,920 [Signals     ] INFO    Signal: Kristian ($$) (3DYXWXnJRnfj...) | Score: 51.5 | MCap: $4,523
+2026-03-25 20:50:56,924 [Scanner     ] INFO    New token: Yes Daddy (Yesdaddy) | 8aMFZx9aUfTJ... | Dev: 7Qd2JUnHxhkM...
+2026-03-25 20:50:57,130 [Signals     ] INFO    Signal: Professor Ape (APE) (DWuf25CRVsTs...) | Score: 54.0 | MCap: $4,796
+2026-03-25 20:50:57,426 [Scanner     ] INFO    New token: Bounce (BOUNCE) | EB1HRQyyEfzM... | Dev: AsmsqBpBzHat...
+2026-03-25 20:50:57,434 [Scanner     ] INFO    New token: ArAIstotle (ArAIstotle) | 7z2pBKZwcbzN... | Dev: FxwArENkKBx4...
+2026-03-25 20:50:57,906 [Signals     ] INFO    Signal: sdfegseg4g434 (4tgfdemdownma) (7c3YC7HfAMnV...) | Score: 41.5 | MCap: $5,044
+2026-03-25 20:50:58,622 [Scanner     ] INFO    New token: Old Pussy is Better ($MILFED) | 4wbVwrqVPsjK... | Dev: 8ZWtevqropKz...
+2026-03-25 20:50:58,660 [httpx       ] INFO    HTTP Request: POST https://api.telegram.org/bot7835547073:AAEpbNcP0wrw50IAIjE5dduODyG0h8vnlf4/getUpdates "HTTP/1.1 200 OK"
+2026-03-25 20:50:59,848 [Signals     ] INFO    Signal: anyone else discord down lol (discord) (2puJpGVxQ9RY...) | Score: 52.0 | MCap: $4,648
+2026-03-25 20:51:00,401 [Signals     ] INFO    Signal: Yes Daddy (Yesdaddy) (8aMFZx9aUfTJ...) | Score: 51.5 | MCap: $4,502
+2026-03-25 20:51:00,673 [Signals     ] INFO    Signal: ArAIstotle (ArAIstotle) (7z2pBKZwcbzN...) | Score: 53.5 | MCap: $5,250
+2026-03-25 20:51:00,812 [Signals     ] INFO    Signal: Bounce (BOUNCE) (EB1HRQyyEfzM...) | Score: 53.5 | MCap: $4,507
+2026-03-25 20:51:01,952 [Signals     ] INFO    Signal: Old Pussy is Better ($MILFED) (4wbVwrqVPsjK...) | Score: 53.0 | MCap: $4,508
+2026-03-25 20:51:01,989 [Scanner     ] INFO    New token: 34f43f34f34f ($34F43F34F34F) | Bbs2UewWRQm2... | Dev: DfLFrUmJSp5P...
+2026-03-25 20:51:02,722 [Scanner     ] INFO    New token: RIP Elton John Drummer (DRUMMER) | 69GhnEQSKiCH... | Dev: Ffgdi3WvDj4K...
+2026-03-25 20:51:05,545 [Scanner     ] INFO    New token: Justice For Piper (PIPER) | 9FNfEJkddgRu... | Dev: 7krcycEXT9PV...
+2026-03-25 20:51:05,692 [Signals     ] INFO    Signal: 34f43f34f34f ($34F43F34F34F) (Bbs2UewWRQm2...) | Score: 52.5 | MCap: $5,100
+2026-03-25 20:51:06,378 [Signals     ] INFO    Signal: RIP Elton John Drummer (DRUMMER) (69GhnEQSKiCH...) | Score: 54.0 | MCap: $4,796
+2026-03-25 20:51:08,738 [httpx       ] INFO    HTTP Request: POST https://api.telegram.org/bot7835547073:AAEpbNcP0wrw50IAIjE5dduODyG0h8vnlf4/getUpdates "HTTP/1.1 200 OK"
+2026-03-25 20:51:09,144 [Signals     ] INFO    Signal: Justice For Piper (PIPER) (9FNfEJkddgRu...) | Score: 51.5 | MCap: $5,389
+2026-03-25 20:51:13,297 [Scanner     ] INFO    New token: 降伏した鹿 (Surrendeer) | 4MwQ8nZALRK4... | Dev: 7kGAXsa7n1qN...
+2026-03-25 20:51:14,063 [Scanner     ] INFO    New token: Galdalf the Gay (Galdalf) | CdZhtrvC9GVF... | Dev: EysDtaqp6457...
+2026-03-25 20:51:14,565 [Scanner     ] INFO    New token: RIP ELTON JOHN (ELTON) | 9yqD6rghjz1N... | Dev: AvcWA3ngM55s...
+2026-03-25 20:51:16,899 [Signals     ] INFO    Signal: 降伏した鹿 (Surrendeer) (4MwQ8nZALRK4...) | Score: 54.0 | MCap: $4,950
+2026-03-25 20:51:17,694 [Signals     ] INFO    Signal: Galdalf the Gay (Galdalf) (CdZhtrvC9GVF...) | Score: 54.5 | MCap: $4,515
+2026-03-25 20:51:17,883 [Scanner     ] INFO    New token: floor 3 (FLOOR3) | 98HQZdT6VQQt... | Dev: Ffgdi3WvDj4K...
+2026-03-25 20:51:18,095 [Signals     ] INFO    Signal: RIP ELTON JOHN (ELTON) (9yqD6rghjz1N...) | Score: 53.0 | MCap: $4,944
+2026-03-25 20:51:18,385 [Scanner     ] INFO    New token: Fake Apology (SORRY) | 7SyjSEfxqjwr... | Dev: CRwZ5Wf9b5TU...
+2026-03-25 20:51:18,828 [httpx       ] INFO    HTTP Request: POST https://api.telegram.org/bot7835547073:AAEpbNcP0wrw50IAIjE5dduODyG0h8vnlf4/getUpdates "HTTP/1.1 200 OK"
+
+
+=== Bot error log ===
+/opt/opus-trencher-bot/main.py:72: RuntimeWarning: coroutine 'Updater.start_polling' was never awaited
+  log.error(f"Telegram bot error: {e}")
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+/opt/opus-trencher-bot/main.py:77: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = datetime.utcnow()
+
+
+=== Files in /opt ===
+README.md
+__pycache__
+auto_trader.py
+backtest
+bot.log
+config.py
+database.py
+deploy.sh
+dev_wallets.db
+fix_deploy.sh
+main.py
+membership.py
+opus-trencher-bot
+opus_bot.db
+opus_bot.db-shm
+opus_bot.db-wal
+payment_processor.py
+referral.py
+remote_deploy.sh
+requirements.txt
+scanner.py
+signals.py
+smart_money.db
+telegram_bot.py
+venv
+wallet_manager.py
+whale_intel.db
+whale_intelligence.py
+
+
+=== Import test ===
+ALL IMPORTS OK
+

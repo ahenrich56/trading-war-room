@@ -1,0 +1,39 @@
+﻿python : Traceback (most 
+recent call last):
+At line:1 char:113
++ ... trencher-bot\venv\Scrip
+ts\activate ; python 
+check_vps.py 2>&1 | Out-F ...
++                            
+              
+~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (Traceba  
+  ck (most recent call las   
+ t)::String) [], RemoteEx    
+ception
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+  File "C:\Users\ant\Desktop\
+app\trading-war-room\opus-tre
+ncher-bot-v3\check_vps.py", 
+line 10, in <module>
+    print(stdout.read().decod
+e('utf-8', errors='replace'))
+    ~~~~~^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\enco
+dings\cp1252.py", line 19, 
+in encode
+    return codecs.charmap_enc
+ode(input,self.errors,encodin
+g_table)[0]
+           ~~~~~~~~~~~~~~~~~~
+~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^
+UnicodeEncodeError: 
+'charmap' codec can't encode 
+character '\u25cf' in 
+position 0: character maps 
+to <undefined>

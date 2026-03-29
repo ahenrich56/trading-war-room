@@ -389,6 +389,8 @@ def calculate_enhanced_score(
     ict_data: dict = None,
     order_flow_data: dict = None,
     mtf_confluence: dict = None,
+    session_data: dict = None,
+    correlation_data: dict = None,
 ):
     """
     Enhanced multi-factor confluence scoring.
@@ -452,6 +454,26 @@ def calculate_enhanced_score(
         mtf_label = mtf_confluence.get("confluence_label", "NEUTRAL")
 
     weighted_score = weighted_score * mtf_multiplier
+
+    # 3c. Apply session confidence modifier (killzones boost, dead zones penalize)
+    session_modifier = 1.0
+    session_label = "UNKNOWN"
+    if session_data:
+        session_modifier = session_data.get("confidence_modifier", 1.0)
+        session_label = session_data.get("label", "UNKNOWN")
+        # Don't apply session modifier to NO_TRADE direction (avoid amplifying noise)
+        if abs(weighted_score) > 10:
+            weighted_score = weighted_score * session_modifier
+
+    # 3d. Apply intermarket correlation modifier
+    correlation_modifier = 1.0
+    correlation_label = "NEUTRAL"
+    if correlation_data:
+        correlation_modifier = correlation_data.get("confidence_modifier", 1.0)
+        correlation_label = correlation_data.get("label", "NEUTRAL")
+        if abs(weighted_score) > 10:
+            weighted_score = weighted_score * correlation_modifier
+
     weighted_score = round(weighted_score, 1)
 
     # 4. Count aligned factors
@@ -527,6 +549,20 @@ def calculate_enhanced_score(
     if mtf_multiplier != 1.0:
         all_signals.append(f"MTF Order Flow: {mtf_label} ({mtf_multiplier}x multiplier)")
 
+    # Add session signal if relevant
+    if session_modifier != 1.0:
+        if session_modifier > 1.0:
+            all_signals.append(f"Session: {session_label} (+{int((session_modifier - 1) * 100)}% boost)")
+        else:
+            all_signals.append(f"Session: {session_label} (-{int((1 - session_modifier) * 100)}% penalty)")
+
+    # Add correlation signal if relevant
+    if correlation_modifier != 1.0:
+        if correlation_modifier > 1.0:
+            all_signals.append(f"Intermarket: {correlation_label} (+{int((correlation_modifier - 1) * 100)}% boost)")
+        else:
+            all_signals.append(f"Intermarket: {correlation_label} (-{int((1 - correlation_modifier) * 100)}% penalty)")
+
     final_score = max(-100, min(100, int(weighted_score)))
 
     # Compute structure-aware SL/TP levels
@@ -544,6 +580,10 @@ def calculate_enhanced_score(
         "factor_scores": factor_scores,
         "mtf_confluence_multiplier": mtf_multiplier,
         "mtf_confluence_label": mtf_label,
+        "session_modifier": session_modifier,
+        "session_label": session_label,
+        "correlation_modifier": correlation_modifier,
+        "correlation_label": correlation_label,
         "structure_levels": structure_levels,
     }
 

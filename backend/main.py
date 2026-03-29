@@ -26,6 +26,10 @@ from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal
 from backtest import calculate_strategy_score, calculate_kelly, run_backtest
 from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
 from signal_scoring import calculate_enhanced_score
+from session_engine import get_current_session, compute_asian_range, format_session_for_ai
+from correlation_engine import analyze_intermarket, format_correlation_for_ai
+from cot_engine import fetch_gold_cot, format_cot_for_ai
+from alerting import send_discord_alert, build_enhanced_telegram_message
 from ws_feed import price_feed
 
 load_dotenv()
@@ -267,12 +271,20 @@ async def generate_analysis_stream(req: AnalysisRequest):
     try:
         # ── 0. Fetch ALL data concurrently ──
         loop = asyncio.get_event_loop()
-        mtf_data, market_context, econ_calendar, whale_alerts = await asyncio.gather(
+        mtf_data, market_context, econ_calendar, whale_alerts, cot_data = await asyncio.gather(
             loop.run_in_executor(executor, fetch_multi_timeframe_data, ticker, tf),
             loop.run_in_executor(executor, fetch_market_context),
             loop.run_in_executor(executor, get_economic_calendar),
             loop.run_in_executor(executor, whale_detector.analyze_ticker, ticker),
+            loop.run_in_executor(executor, fetch_gold_cot),
         )
+
+        # Session / Killzone detection (instant — no I/O)
+        session_data = get_current_session()
+        session_text = format_session_for_ai(session_data)
+
+        # COT formatting
+        cot_text = format_cot_for_ai(cot_data)
 
         mtf_summary = build_mtf_summary(mtf_data, ticker)
         primary = list(mtf_data["indicators"].values())[0] if mtf_data["indicators"] else {}
@@ -298,13 +310,37 @@ async def generate_analysis_stream(req: AnalysisRequest):
         if dataframes:
             mtf_of = compute_mtf_order_flow(dataframes, tf)
 
+        # ── Asian Range (for London breakout levels) ──
+        asian_range = {}
+        if primary_df is not None and not primary_df.empty:
+            asian_range = compute_asian_range(primary_df)
+
         # Stream ICT, Order Flow, and Backtest data to frontend panels
         yield emit("ICT", {"ticker": ticker, "timeframe": tf, "ict": ict_data})
         yield emit("ORDER_FLOW", order_flow_data)
         yield emit("MTF_ORDER_FLOW", mtf_of)
+        yield emit("SESSION", session_data)
 
-        # ── Calculate Enhanced Strategy Score (5-Factor Confluence) ──
-        enhanced = calculate_enhanced_score(primary, ict_data, order_flow_data, mtf_confluence=mtf_of)
+        # ── Intermarket Correlation Analysis ──
+        # Run after we have a preliminary direction from scoring (two-pass)
+        # First pass: get direction without intermarket modifier
+        preliminary = calculate_enhanced_score(primary, ict_data, order_flow_data, mtf_confluence=mtf_of, session_data=session_data)
+        prelim_dir = preliminary["direction"]
+
+        # Now fetch intermarket with the preliminary direction
+        correlation_data = await loop.run_in_executor(
+            executor, analyze_intermarket, tf, prelim_dir
+        )
+        correlation_text = format_correlation_for_ai(correlation_data)
+        yield emit("CORRELATION", correlation_data)
+
+        # ── Calculate Enhanced Strategy Score (5-Factor Confluence) — FINAL with all modifiers ──
+        enhanced = calculate_enhanced_score(
+            primary, ict_data, order_flow_data,
+            mtf_confluence=mtf_of,
+            session_data=session_data,
+            correlation_data=correlation_data,
+        )
         strat_score = enhanced["score"]
         strat_dir = enhanced["direction"]
         strat_reasons = enhanced["signals"]

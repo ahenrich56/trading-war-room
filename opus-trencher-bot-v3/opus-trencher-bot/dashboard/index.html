@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPUS Trencher Bot — Dashboard</title>
+  <meta name="description" content="Live Pump.fun Token Scanner & Auto-Trader Dashboard">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #05050A;
+      --bg-secondary: #0A0A14;
+      --bg-card: #0D0D1A;
+      --bg-card-hover: #12122A;
+      --gold: #D4A843;
+      --gold-soft: #C9972E;
+      --gold-glow: rgba(212, 168, 67, 0.15);
+      --green: #22C55E;
+      --green-soft: rgba(34, 197, 94, 0.15);
+      --red: #EF4444;
+      --red-soft: rgba(239, 68, 68, 0.15);
+      --cyan: #06B6D4;
+      --cyan-soft: rgba(6, 182, 212, 0.15);
+      --purple: #A855F7;
+      --text-primary: #E2E8F0;
+      --text-secondary: #64748B;
+      --text-muted: #334155;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-gold: rgba(212, 168, 67, 0.2);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: 
+        radial-gradient(circle at 20% 50%, rgba(212, 168, 67, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(6, 182, 212, 0.02) 0%, transparent 50%),
+        linear-gradient(rgba(255,255,255,0.01) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.01) 1px, transparent 1px);
+      background-size: 100%, 100%, 40px 40px, 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-gold);
+      border-radius: 16px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    }
+    .header-left h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      background: linear-gradient(135deg, var(--gold), #F5D78E, var(--gold-soft));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-transform: uppercase;
+    }
+    .header-left .subtitle {
+      font-size: 10px;
+      color: var(--text-secondary);
+      letter-spacing: 2px;
+      margin-top: 4px;
+    }
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .mode-badge.paper {
+      background: rgba(212, 168, 67, 0.1);
+      border: 1px solid rgba(212, 168, 67, 0.3);
+      color: var(--gold);
+    }
+    .mode-badge.live {
+      background: var(--red-soft);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--red);
+    }
+    .mode-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    .mode-dot.paper { background: var(--gold); }
+    .mode-dot.live { background: var(--red); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    .status-dot.offline { background: var(--red); animation: none; }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      text-align: center;
+      transition: all 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255,255,255,0.1);
+      transform: translateY(-2px);
+    }
+    .stat-card .label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .stat-card .value {
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .stat-card .value.gold { color: var(--gold); }
+    .stat-card .value.green { color: var(--green); }
+    .stat-card .value.red { color: var(--red); }
+    .stat-card .value.cyan { color: var(--cyan); }
+    .stat-card .value.white { color: var(--text-primary); }
+
+    /* Sections */
+    .section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.01);
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .section-title.gold { color: var(--gold); }
+    .section-title.green { color: var(--green); }
+    .section-title.cyan { color: var(--cyan); }
+    .section-title.purple { color: var(--purple); }
+    .section-count {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+    }
+
+    /* Table-like rows */
+    .data-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+    .data-row:last-child { border-bottom: none; }
+    .data-row:hover { background: rgba(255,255,255,0.02); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    .badge.safe { background: var(--green-soft); color: var(--green); }
+    .badge.caution { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
+    .badge.danger { background: var(--red-soft); color: var(--red); }
+    .badge.rug { background: rgba(239, 68, 68, 0.25); color: #FCA5A5; }
+    .badge.open { background: var(--cyan-soft); color: var(--cyan); }
+    .badge.closed { background: rgba(100, 116, 139, 0.15); color: var(--text-secondary); }
+    .badge.paper { background: var(--gold-glow); color: var(--gold); }
+    .badge.win { background: var(--green-soft); color: var(--green); }
+    .badge.loss { background: var(--red-soft); color: var(--red); }
+
+    .token-name {
+      font-weight: 700;
+      color: var(--text-primary);
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .token-ca {
+      font-size: 10px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .token-ca:hover { color: var(--purple); text-decoration: underline; }
+
+    .score-bar {
+      width: 60px;
+      height: 6px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 3px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+    .score-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s;
+    }
+
+    .pnl { font-weight: 800; font-size: 12px; }
+    .pnl.positive { color: var(--green); }
+    .pnl.negative { color: var(--red); }
+
+    .ml-auto { margin-left: auto; }
+    .text-muted { color: var(--text-secondary); font-size: 10px; }
+    .flex-center { display: flex; align-items: center; gap: 8px; }
+    .flex-1 { flex: 1; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+    }
+    .tab {
+      padding: 10px 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .tab:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+    .tab.active {
+      background: var(--gold-glow);
+      border-color: var(--border-gold);
+      color: var(--gold);
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* Loading state */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top: 3px solid var(--gold);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Positions card special */
+    .position-card {
+      background: rgba(6, 182, 212, 0.03);
+      border: 1px solid rgba(6, 182, 212, 0.1);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin: 8px 20px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container { padding: 10px; }
+      .header { flex-direction: column; gap: 12px; padding: 16px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .data-row { flex-wrap: wrap; }
+    }
+
+    /* Offline overlay */
+    .offline-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      gap: 16px;
+    }
+    .offline-overlay .icon { font-size: 64px; }
+    .offline-overlay h2 { color: var(--red); font-size: 24px; letter-spacing: 3px; }
+    .offline-overlay p { color: var(--text-secondary); font-size: 12px; }
+    .retry-btn {
+      padding: 10px 28px;
+      background: var(--gold-glow);
+      border: 1px solid var(--border-gold);
+      border-radius: 8px;
+      color: var(--gold);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .retry-btn:hover { background: rgba(212, 168, 67, 0.25); transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+  <div class="container" id="app">
+    <div class="loading"><div class="spinner"></div></div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin + "/opus-api";
+    let botData = null;
+    let signals = [];
+    let trades = [];
+    let activeTab = "overview";
+    let online = false;
+    let refreshInterval = null;
+
+    async function fetchJson(endpoint) {
+      try {
+        const res = await fetch(`${API_BASE}/${endpoint}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (e) {
+        console.error(`API error (${endpoint}):`, e);
+        return null;
+      }
+    }
+
+    async function refreshData() {
+      const [statusData, signalData, tradeData] = await Promise.all([
+        fetchJson("status"),
+        fetchJson("signals?limit=40"),
+        fetchJson("trades?limit=40"),
+      ]);
+
+      if (statusData) {
+        botData = statusData;
+        online = true;
+      } else {
+        online = false;
+      }
+
+      if (signalData) signals = signalData.signals || [];
+      if (tradeData) trades = tradeData.trades || [];
+
+      render();
+    }
+
+    function getScoreColor(score) {
+      if (score >= 70) return "var(--green)";
+      if (score >= 50) return "#F59E0B";
+      return "var(--red)";
+    }
+
+    function getRiskBadge(level) {
+      const l = (level || "").toUpperCase();
+      if (l === "SAFE") return '<span class="badge safe">SAFE</span>';
+      if (l === "CAUTION") return '<span class="badge caution">CAUTION</span>';
+      if (l === "DANGER") return '<span class="badge danger">DANGER</span>';
+      if (l === "RUG") return '<span class="badge rug">RUG</span>';
+      return '<span class="badge closed">?</span>';
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return "";
+      const now = Date.now() / 1000;
+      const t = typeof ts === "string" ? new Date(ts).getTime() / 1000 : ts;
+      const d = Math.floor(now - t);
+      if (d < 60) return `${d}s ago`;
+      if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+      if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+      return `${Math.floor(d / 86400)}d ago`;
+    }
+
+    function render() {
+      const app = document.getElementById("app");
+
+      if (!online) {
+        app.innerHTML = `
+          <div class="header">
+            <div class="header-left">
+              <h1>OPUS Trencher Bot</h1>
+              <div class="subtitle">Live Pump.fun Token Scanner & Auto-Trader</div>
+            </div>
+            <div class="status-indicator"><div class="status-dot offline"></div> OFFLINE</div>
+          </div>
+          <div class="offline-overlay">
+            <div class="icon">🔌</div>
+            <h2>BOT OFFLINE</h2>
+            <p>The Trencher Bot API is not responding. Make sure the bot service is running.</p>
+            <button class="retry-btn" onclick="refreshData()">RETRY CONNECTION</button>
+          </div>`;
+        return;
+      }
+
+      const t = botData.trader || {};
+      const s = botData.scanner || {};
+      const b = botData.bot || {};
+      const positions = botData.open_positions || [];
+      const isPaper = b.paper_mode;
+      const totalPnl = parseFloat(t.total_pnl) || 0;
+      const dailyPnl = parseFloat(t.daily_pnl) || 0;
+
+      app.innerHTML = `
+        <!-- Header -->
+        <div class="header">
+          <div class="header-left">
+            <h1>🚀 OPUS Trencher Bot</h1>
+            <div class="subtitle">Live Pump.fun Token Scanner & Auto-Trader</div>
+          </div>
+          <div class="flex-center">
+            <div class="mode-badge ${isPaper ? 'paper' : 'live'}">
+              <div class="mode-dot ${isPaper ? 'paper' : 'live'}"></div>
+              ${isPaper ? '📝 PAPER TRADING' : '🔴 LIVE TRADING'}
+            </div>
+            <div class="status-indicator"><div class="status-dot"></div> ONLINE</div>
+          </div>
+        </div>
+
+        <!-- Strategy Info -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+          <span class="badge paper">STRATEGY: ${(b.strategy || 'aggressive').toUpperCase()}</span>
+          <span class="badge safe">TP: ${b.tp_mult || 3}x</span>
+          <span class="badge danger">SL: ${((b.sl_pct || 0.4) * 100).toFixed(0)}%</span>
+          <span class="badge open">MAX POS: ${b.max_positions || 3}</span>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-grid">
+          <div class="stat-card"><div class="label">💰 Bankroll</div><div class="value gold">${t.bankroll || '0 SOL'}</div></div>
+          <div class="stat-card"><div class="label">📈 Total PnL</div><div class="value ${totalPnl >= 0 ? 'green' : 'red'}">${t.total_pnl || '+0.0000 SOL'}</div></div>
+          <div class="stat-card"><div class="label">📊 Daily PnL</div><div class="value ${dailyPnl >= 0 ? 'green' : 'red'}">${t.daily_pnl || '+0.0000 SOL'}</div></div>
+          <div class="stat-card"><div class="label">🎯 Win Rate</div><div class="value cyan">${t.win_rate || '0%'}</div></div>
+          <div class="stat-card"><div class="label">✅ Wins / ❌ Losses</div><div class="value white">${t.wins || 0} / ${t.losses || 0}</div></div>
+          <div class="stat-card"><div class="label">📉 Max Drawdown</div><div class="value red">${t.max_drawdown || '0%'}</div></div>
+        </div>
+
+        <!-- Scanner Stats -->
+        <div class="stats-grid">
+          <div class="stat-card"><div class="label">🔍 Tokens Scanned</div><div class="value gold">${s.tokens_seen || 0}</div></div>
+          <div class="stat-card"><div class="label">✅ Passed Filter</div><div class="value green">${s.tokens_passed || 0}</div></div>
+          <div class="stat-card"><div class="label">❌ Rejected</div><div class="value red">${s.tokens_rejected || 0}</div></div>
+          <div class="stat-card"><div class="label">📊 Pass Rate</div><div class="value cyan">${s.pass_rate || '0%'}</div></div>
+        </div>
+
+        <!-- Open Positions -->
+        ${positions.length > 0 ? `
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title cyan">📈 OPEN POSITIONS</span>
+              <span class="badge open">${positions.length}</span>
+            </div>
+            ${positions.map(p => `
+              <div class="position-card">
+                <div class="flex-center" style="margin-bottom:6px;">
+                  <span class="token-name">${p.name}</span>
+                  <span class="badge open">${p.entry_price.toFixed(4)} SOL</span>
+                  <span class="text-muted">Score: ${p.safety_score.toFixed(0)}</span>
+                  <span class="text-muted ml-auto">${timeAgo(p.entry_time)}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab ${activeTab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">📊 OVERVIEW</button>
+          <button class="tab ${activeTab === 'signals' ? 'active' : ''}" onclick="setTab('signals')">🔔 SIGNALS (${signals.length})</button>
+          <button class="tab ${activeTab === 'trades' ? 'active' : ''}" onclick="setTab('trades')">💰 TRADES (${trades.length})</button>
+        </div>
+
+        <!-- Tab Content -->
+        ${activeTab === 'overview' ? renderOverview() : ''}
+        ${activeTab === 'signals' ? renderSignals() : ''}
+        ${activeTab === 'trades' ? renderTrades() : ''}
+      `;
+    }
+
+    function renderOverview() {
+      return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="section">
+            <div class="section-header"><span class="section-title gold">RECENT SIGNALS</span></div>
+            ${signals.slice(0, 8).map(s => `
+              <div class="data-row">
+                <span style="width:8px;height:8px;border-radius:50%;background:${s.passed ? 'var(--green)' : 'var(--red)'};flex-shrink:0;"></span>
+                <span class="token-name" style="max-width:130px;">${s.token_name || '?'}</span>
+                <span class="text-muted">${(s.safety_score || 0).toFixed(1)}/100</span>
+                <span class="score-bar"><span class="score-bar-fill" style="width:${s.safety_score || 0}%;background:${getScoreColor(s.safety_score)}"></span></span>
+                ${getRiskBadge(s.risk_level)}
+              </div>
+            `).join('') || '<div class="empty-state"><div class="icon">🔍</div>No signals yet</div>'}
+          </div>
+          <div class="section">
+            <div class="section-header"><span class="section-title green">RECENT TRADES</span></div>
+            ${trades.slice(0, 8).map(t => `
+              <div class="data-row">
+                ${t.status === 'OPEN'
+                  ? '<span class="badge open">OPEN</span>'
+                  : t.pnl > 0 ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>'
+                }
+                <span class="token-name" style="max-width:100px;">${t.token_name || (t.token_ca || '').slice(0, 10)}</span>
+                <span class="text-muted">${(t.amount || 0).toFixed(4)} SOL</span>
+                ${t.status !== 'OPEN' && t.pnl != null ? `<span class="pnl ${t.pnl >= 0 ? 'positive' : 'negative'} ml-auto">${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(4)}</span>` : ''}
+              </div>
+            `).join('') || '<div class="empty-state"><div class="icon">💰</div>No trades yet</div>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSignals() {
+      if (signals.length === 0) return '<div class="section"><div class="empty-state"><div class="icon">🔍</div>No signals detected yet. The scanner is running...</div></div>';
+      return `
+        <div class="section">
+          <div class="section-header"><span class="section-title gold">ALL DETECTED SIGNALS</span><span class="badge paper">${signals.length}</span></div>
+          ${signals.map(s => `
+            <div class="data-row">
+              <span style="width:8px;height:8px;border-radius:50%;background:${s.passed ? 'var(--green)' : 'var(--red)'};flex-shrink:0;"></span>
+              <span class="token-name">${s.token_name || '?'}</span>
+              <span class="text-muted">Score: ${(s.safety_score || 0).toFixed(1)}</span>
+              <span class="score-bar"><span class="score-bar-fill" style="width:${s.safety_score || 0}%;background:${getScoreColor(s.safety_score)}"></span></span>
+              ${getRiskBadge(s.risk_level)}
+              <span class="text-muted">MCap: $${(s.market_cap || 0).toLocaleString()}</span>
+              <a href="https://pump.fun/${s.token_ca}" target="_blank" class="token-ca ml-auto">${(s.token_ca || '').slice(0, 8)}… ↗</a>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderTrades() {
+      if (trades.length === 0) return '<div class="section"><div class="empty-state"><div class="icon">💰</div>No trades executed yet. Waiting for signals to pass the filter...</div></div>';
+      return `
+        <div class="section">
+          <div class="section-header"><span class="section-title green">ALL TRADES</span><span class="badge paper">${trades.length}</span></div>
+          ${trades.map(t => `
+            <div class="data-row">
+              ${t.status === 'OPEN'
+                ? '<span class="badge open">OPEN</span>'
+                : t.pnl > 0 ? '<span class="badge win">WIN</span>' : '<span class="badge loss">LOSS</span>'
+              }
+              <span class="token-name">${t.token_name || (t.token_ca || '').slice(0, 12)}</span>
+              <span class="text-muted">${(t.amount || 0).toFixed(4)} SOL</span>
+              ${t.status !== 'OPEN' && t.pnl != null ? `<span class="pnl ${t.pnl >= 0 ? 'positive' : 'negative'}">${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(4)} SOL</span>` : ''}
+              <span class="text-muted">${t.reason || ''}</span>
+              <span class="text-muted ml-auto">${t.paper_mode ? '📝' : '🔴'} ${timeAgo(t.timestamp)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function setTab(tab) {
+      activeTab = tab;
+      render();
+    }
+
+    // Initial load + auto-refresh
+    refreshData();
+    refreshInterval = setInterval(refreshData, 8000);
+  </script>
+</body>
+</html>

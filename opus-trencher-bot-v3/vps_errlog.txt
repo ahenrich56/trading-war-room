@@ -1,0 +1,5 @@
+/opt/opus-trencher-bot/main.py:72: RuntimeWarning: coroutine 'Updater.start_polling' was never awaited
+  log.error(f"Telegram bot error: {e}")
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+/opt/opus-trencher-bot/main.py:77: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = datetime.utcnow()

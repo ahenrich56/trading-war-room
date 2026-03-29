@@ -1,0 +1,24 @@
+{
+  "parameters": {
+    "safety_score_threshold": 0.7,
+    "min_initial_liquidity": 1000,
+    "min_volume": 500,
+    "take_profit_multiplier": 5.0,
+    "stop_loss_multiplier": 0.5,
+    "position_size_sol": 50,
+    "max_concurrent_positions": 3,
+    "entry_timing": "immediate"
+  },
+  "metrics": {
+    "total_trades": 14,
+    "winning_trades": 4,
+    "losing_trades": 10,
+    "win_rate": 0.2857142857142857,
+    "total_pnl": 400.52019520034105,
+    "avg_return": 0.5721717074290587,
+    "best_trade": 200.0,
+    "worst_trade": -25.0,
+    "max_drawdown": -100.0,
+    "sharpe_ratio": 5.0002872111109955
+  }
+}
