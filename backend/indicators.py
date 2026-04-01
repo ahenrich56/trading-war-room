@@ -170,6 +170,82 @@ def compute_indicators(df: pd.DataFrame) -> dict:
             else:
                 indicators["RSI_condition"] = "NEUTRAL"
 
+        # ── Lag / Persistence Features (for ML training and better scoring) ──
+        try:
+            # RSI 5 bars ago (momentum persistence)
+            rsi_series_full = 100 - (100 / (1 + (
+                close.diff().where(close.diff() > 0, 0.0).ewm(com=13, min_periods=14).mean() /
+                (-close.diff().where(close.diff() < 0, 0.0)).ewm(com=13, min_periods=14).mean()
+            )))
+            if len(rsi_series_full) >= 6 and not pd.isna(rsi_series_full.iloc[-6]):
+                indicators["RSI_lag_5"] = round(float(rsi_series_full.iloc[-6]), 2)
+
+            # Consecutive bars RSI has stayed above/below 50
+            rsi_above = (rsi_series_full > 50).astype(int)
+            rsi_below = (rsi_series_full < 50).astype(int)
+            above_streak, below_streak = 0, 0
+            for v in reversed(rsi_above.values[-30:]):
+                if v == 1:
+                    above_streak += 1
+                else:
+                    break
+            for v in reversed(rsi_below.values[-30:]):
+                if v == 1:
+                    below_streak += 1
+                else:
+                    break
+            indicators["RSI_bars_above_50"] = above_streak
+            indicators["RSI_bars_below_50"] = below_streak
+
+            # ATR as % of price (normalised volatility for regime comparison)
+            if indicators.get("ATR_14") and current_price:
+                indicators["ATR_pct"] = round(indicators["ATR_14"] / current_price * 100, 3)
+
+            # ATR acceleration: current ATR vs ATR 5 bars ago
+            atr_series = pd.concat([high - low,
+                                    (high - close.shift()).abs(),
+                                    (low - close.shift()).abs()], axis=1).max(axis=1)
+            atr_full = atr_series.ewm(span=14, adjust=False).mean()
+            if len(atr_full) >= 6 and not pd.isna(atr_full.iloc[-6]) and atr_full.iloc[-6] > 0:
+                indicators["ATR_acceleration"] = round(float(atr_full.iloc[-1] / atr_full.iloc[-6]), 3)
+
+            # MACD histogram 3 bars ago (acceleration/deceleration)
+            ema_fast_s = _ema(close, 12)
+            ema_slow_s = _ema(close, 26)
+            macd_s = ema_fast_s - ema_slow_s
+            sig_s = _ema(macd_s, 9)
+            hist_s = macd_s - sig_s
+            if len(hist_s) >= 4 and not pd.isna(hist_s.iloc[-4]):
+                indicators["MACD_histogram_lag_3"] = round(float(hist_s.iloc[-4]), 4)
+
+            # Bars since EMA 9/21 last crossed
+            if "EMA_9" in indicators and "EMA_21" in indicators:
+                ema9_s = _ema(close, 9)
+                ema21_s = _ema(close, 21)
+                cross_diff = (ema9_s - ema21_s)
+                cross_sign = cross_diff.apply(lambda x: 1 if x > 0 else -1)
+                sign_changes = (cross_sign != cross_sign.shift()).iloc[-50:]
+                last_cross_idx = sign_changes[sign_changes].index
+                if len(last_cross_idx) > 0:
+                    bars_since = len(close) - close.index.get_loc(last_cross_idx[-1]) - 1
+                    indicators["bars_since_ema_cross"] = int(bars_since)
+
+            # EMA full stack alignment score: +1 for each bull level, -1 for each bear
+            ema_vals = {p: indicators.get(f"EMA_{p}") for p in [9, 21, 50, 200]}
+            if all(v is not None for v in ema_vals.values()):
+                bull_stack = int(ema_vals[9] > ema_vals[21]) + int(ema_vals[21] > ema_vals[50]) + int(ema_vals[50] > ema_vals[200])
+                bear_stack = int(ema_vals[9] < ema_vals[21]) + int(ema_vals[21] < ema_vals[50]) + int(ema_vals[50] < ema_vals[200])
+                indicators["ema_stack_score"] = bull_stack - bear_stack  # -3 to +3
+
+            # Price position within Bollinger Bands (0=at lower, 1=at upper)
+            if all(k in indicators for k in ("BB_upper", "BB_lower")):
+                bb_range = indicators["BB_upper"] - indicators["BB_lower"]
+                if bb_range > 0:
+                    indicators["BB_position"] = round((current_price - indicators["BB_lower"]) / bb_range, 3)
+
+        except Exception:
+            pass  # Lag features are best-effort — never block main indicator computation
+
     except Exception as e:
         indicators["computation_error"] = str(e)
 

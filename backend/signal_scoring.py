@@ -349,11 +349,11 @@ def _apply_hard_gates(adx, volume_ratio, atr, direction):
     if atr is None or atr == 0:
         return True, "ATR unavailable — cannot size stops"
 
-    if adx is not None and adx < 15:
-        return True, f"ADX={adx:.1f} < 15 — no tradeable trend"
+    if adx is not None and adx < 18:
+        return True, f"ADX={adx:.1f} < 18 — insufficient trend strength"
 
-    if volume_ratio is not None and volume_ratio < 0.1:
-        return True, f"Volume ratio={volume_ratio:.1f}x < 0.1 — insufficient liquidity"
+    if volume_ratio is not None and volume_ratio < 0.3:
+        return True, f"Volume ratio={volume_ratio:.1f}x < 0.3 — insufficient liquidity"
 
     return False, ""
 
@@ -373,11 +373,11 @@ def _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_diverg
     if has_divergence and not order_flow_agrees:
         return "C"  # Mixed signals, not a total failure
 
-    if factors_aligned >= 4 and abs_score > 50 and order_flow_agrees:
+    if factors_aligned >= 4 and abs_score > 55 and order_flow_agrees:
         return "A+"
-    elif factors_aligned >= 3 and abs_score > 35:
+    elif factors_aligned >= 3 and abs_score > 40 and order_flow_agrees:
         return "A"
-    elif factors_aligned >= 2 and abs_score > 20:
+    elif factors_aligned >= 2 and abs_score > 27:
         return "B"
     elif abs_score > 10:
         return "C"
@@ -502,9 +502,15 @@ def calculate_enhanced_score(
     else:
         factors_aligned = 0
 
+    # Confluence floor: require at least 2 factors meaningfully aligned
+    if direction in ("LONG", "SHORT") and factors_aligned < 2:
+        direction = "NO_TRADE"
+        all_signals_extra = ["No trade: fewer than 2 factors aligned — insufficient confluence"]
+
     # 5. Order flow gate — check for contradictions
     order_flow_agrees = True
     has_divergence = False
+    has_contra_divergence = False  # divergence that directly contradicts signal direction
 
     divergences = of_summary.get("divergences", [])
     if divergences:
@@ -515,10 +521,34 @@ def calculate_enhanced_score(
     elif direction == "SHORT" and of_score > 20:
         order_flow_agrees = False
 
+    # Detect directional divergence contradiction (used to hard-cap A+)
+    for div in divergences:
+        div_type = div.get("type", "")
+        if direction == "LONG" and div_type == "BEARISH_DIVERGENCE":
+            has_contra_divergence = True
+            break
+        elif direction == "SHORT" and div_type == "BULLISH_DIVERGENCE":
+            has_contra_divergence = True
+            break
+
     # Order flow contradiction is reflected in grade, not as a hard block
 
     # 6. Grade signal
     grade = _grade_signal(weighted_score, factors_aligned, order_flow_agrees, has_divergence)
+
+    # Hard cap: A+ cannot survive a contradicting CVD divergence
+    # (price makes new extreme but smart money doesn't confirm — high failure rate)
+    if grade == "A+" and has_contra_divergence:
+        grade = "A"
+        all_signals_extra.append("A+ capped to A: Contradicting CVD divergence detected")
+
+    # Dead zone downgrade: grade B in low-conviction sessions → C
+    # session_modifier <= 0.70 = NY Lunch or overnight dead zone
+    if grade == "B" and session_modifier <= 0.70:
+        grade = "C"
+        all_signals_extra.append(
+            f"Grade B downgraded to C: dead zone session (modifier={session_modifier:.2f})"
+        )
 
     # Downgrade direction on F grade only (C can still produce signals)
     if grade == "F":

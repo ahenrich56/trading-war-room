@@ -7,3 +7,6 @@ yfinance
 pandas
 numpy
 httpx
+xgboost
+scikit-learn
+zstandard

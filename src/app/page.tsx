@@ -17,6 +17,7 @@ import { MultiChartGrid } from "@/components/MultiChartGrid";
 import { AlertBell } from "@/components/AlertBell";
 import { MarketHeatmap } from "@/components/MarketHeatmap";
 import { AnalysisHUD } from "@/components/AnalysisHUD";
+import { MLStatsPanel } from "@/components/MLStatsPanel";
 import { GlassFilter } from "@/components/ui/liquid-glass";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar } from "lucide-react";
 
@@ -500,6 +501,9 @@ export default function WarRoomDashboard() {
               )}
 
               {signal && <SignalStrip signal={signal} currentPrice={chartData?.candles?.length ? chartData.candles[chartData.candles.length - 1].close : undefined} />}
+
+              {/* ML Stats */}
+              <MLStatsPanel />
 
               {/* Section divider */}
               {Object.keys(agentData).length > 0 && (

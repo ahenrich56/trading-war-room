@@ -26,6 +26,10 @@ from db import DB_PATH, _init_db, store_signal, get_learning_context, get_signal
 from backtest import calculate_strategy_score, calculate_kelly, run_backtest
 from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
 from signal_scoring import calculate_enhanced_score
+from ml_signal_filter import (
+    predict_win_probability, auto_train_if_ready,
+    get_model_stats, is_model_ready, WIN_PROBABILITY_THRESHOLD,
+)
 from session_engine import get_current_session, compute_asian_range, format_session_for_ai
 from correlation_engine import analyze_intermarket, format_correlation_for_ai
 from cot_engine import fetch_gold_cot, format_cot_for_ai
@@ -107,6 +111,12 @@ class OutcomeReport(BaseModel):
     result: str  # WIN or LOSS
     pnl_pct: float
     notes: str = ""
+
+class SeedBacktestRequest(BaseModel):
+    csv_path: str
+    ticker: str = "NQ"
+    min_grade: str = "B"
+    max_bars: int | None = None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -568,6 +578,31 @@ Output ONLY valid JSON, no markdown:
         signal_data["mtf_confluence_label"] = enhanced.get("mtf_confluence_label", "NEUTRAL")
         signal_data["mtf_confluence_multiplier"] = enhanced.get("mtf_confluence_multiplier", 1.0)
         signal_data["structure_levels"] = structure_levels
+
+        # ── Full feature snapshot for ML training ──
+        signal_data["score"] = enhanced.get("score", 0)
+        signal_data["factor_scores"] = enhanced.get("factor_scores", {})
+        signal_data["session_modifier"] = enhanced.get("session_modifier", 1.0)
+        signal_data["session_label"] = enhanced.get("session_label", "ACTIVE")
+        signal_data["correlation_modifier"] = enhanced.get("correlation_modifier", 1.0)
+        signal_data["correlation_label"] = enhanced.get("correlation_label", "")
+        # Full raw indicator snapshot (replaces sparse indicators_used for ML)
+        _scalar_keys = (int, float, str, bool, type(None))
+        signal_data["raw_indicators"] = {
+            k: v for k, v in primary.items()
+            if isinstance(v, _scalar_keys) and k != "computation_error"
+        }
+
+        # ── ML Signal Filter ──
+        # Once enough outcomes exist the model runs live; before that it's transparent (0.5)
+        ml_prob = predict_win_probability(signal_data)
+        signal_data["ml_win_probability"] = ml_prob
+        if is_model_ready() and signal_data.get("signal") in ("LONG", "SHORT"):
+            if ml_prob < WIN_PROBABILITY_THRESHOLD:
+                signal_data["signal"] = "NO_TRADE"
+                signal_data["reasons"] = signal_data.get("reasons", []) + [
+                    f"ML filter blocked: P(WIN)={ml_prob:.2f} < {WIN_PROBABILITY_THRESHOLD} threshold"
+                ]
 
         # Store signal in history and send Telegram alert
         await store_signal(signal_data)
@@ -1038,13 +1073,56 @@ async def backtest_endpoint(request: BacktestRequest):
     result = await loop.run_in_executor(executor, run_backtest, request.ticker, request.timeframe, request.lookback_days)
     return result
 
+@app.post("/api/v1/seed-backtest")
+async def seed_backtest_endpoint(request: SeedBacktestRequest):
+    """
+    Import historical CSV data and seed the SQLite DB with signal+outcome pairs
+    to bootstrap the XGBoost ML signal filter.
+
+    The seeder runs in a thread pool executor so it does not block the event loop.
+    For large files (1yr of 1m bars ≈ 130k rows) expect ~2-3 minutes runtime.
+    """
+    from fastapi import HTTPException
+    from csv_backtest_seeder import seed_from_csv
+
+    if not os.path.exists(request.csv_path):
+        raise HTTPException(status_code=400, detail=f"File not found: {request.csv_path}")
+
+    if request.min_grade not in ("A+", "A", "B", "C", "F"):
+        raise HTTPException(status_code=400, detail="min_grade must be one of: A+, A, B, C, F")
+
+    loop = asyncio.get_event_loop()
+    stats = await loop.run_in_executor(
+        executor,
+        lambda: seed_from_csv(
+            filepath=request.csv_path,
+            ticker=request.ticker,
+            min_grade=request.min_grade,
+            max_bars=request.max_bars,
+        ),
+    )
+    return {
+        "status": "completed",
+        "stats": stats,
+        "ml_model_ready": is_model_ready(),
+    }
+
 @app.post("/api/v1/outcomes/report")
 async def report_outcome_endpoint(report: OutcomeReport):
-    return report_outcome(report.dict())
+    result = report_outcome(report.dict())
+    # Trigger ML retraining in background whenever a new outcome is recorded
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, auto_train_if_ready, DB_PATH)
+    return result
 
 @app.get("/api/v1/outcomes")
 async def get_outcomes_endpoint():
     return get_outcomes()
+
+@app.get("/api/v1/ml-stats")
+async def ml_stats_endpoint():
+    """Return ML model training status and feature importances."""
+    return get_model_stats()
 
 
 # ═══════════════════════════════════════════════════════════
