@@ -193,10 +193,15 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 #  CSV LOADER
 # ═══════════════════════════════════════════════════════════
 
-def load_csv(filepath: str) -> pd.DataFrame:
+def load_csv(filepath: str, symbol_filter: str = None) -> pd.DataFrame:
     """
     Load one CSV file, a ZIP archive, or a directory of CSV/TXT/ZIP files
     into a single normalised DataFrame.
+
+    Args:
+        symbol_filter: If set, only load files whose name contains this symbol
+                       (e.g. "NQ" loads NQ contracts but skips MNQ micro).
+                       Uses exact prefix matching: ".NQ" matches but ".MNQ" does not.
     """
     if os.path.isdir(filepath):
         files = sorted(
@@ -208,14 +213,14 @@ def load_csv(filepath: str) -> pd.DataFrame:
             raise FileNotFoundError(f"No CSV/TXT/ZIP files found in directory: {filepath}")
         frames = []
         for f in files:
-            frames.extend(_load_file(f))
+            frames.extend(_load_file(f, symbol_filter=symbol_filter))
         combined = pd.concat(frames)
         if isinstance(combined.index, pd.DatetimeIndex):
             combined = combined[~combined.index.duplicated(keep="first")]
             combined.sort_index(inplace=True)
         return combined
 
-    frames = _load_file(filepath)
+    frames = _load_file(filepath, symbol_filter=symbol_filter)
     if len(frames) == 1:
         return frames[0]
     combined = pd.concat(frames)
@@ -225,7 +230,19 @@ def load_csv(filepath: str) -> pd.DataFrame:
     return combined
 
 
-def _load_file(filepath: str) -> list:
+def _matches_symbol_filter(filename: str, symbol_filter: str) -> bool:
+    """Check if a filename matches the symbol filter (e.g. 'NQ' matches .NQ but not .MNQ)."""
+    if not symbol_filter:
+        return True
+    # Match ".NQ" but not ".MNQ" — look for the symbol after a dot
+    base = os.path.basename(filename).upper()
+    sf = symbol_filter.upper()
+    # Check for exact symbol prefix after dot: .NQH5, .NQM2 but not .MNQH5
+    import re
+    return bool(re.search(rf'\.{sf}[A-Z0-9]', base))
+
+
+def _load_file(filepath: str, symbol_filter: str = None) -> list:
     """Return a list of normalised DataFrames from a file (CSV, TXT, ZIP, or ZST)."""
     if zipfile.is_zipfile(filepath):
         frames = []
@@ -238,10 +255,11 @@ def _load_file(filepath: str) -> list:
                 and not os.path.basename(n).startswith(".")
                 and not os.path.basename(n).startswith("symbology")
                 and zf.getinfo(n).file_size >= 10_000
+                and _matches_symbol_filter(n, symbol_filter)
             )
             if not csv_names:
                 raise ValueError(f"No usable CSV files found inside ZIP: {filepath}")
-            print(f"[seeder] Found {len(csv_names)} files in ZIP")
+            print(f"[seeder] Found {len(csv_names)} files in ZIP (filter: {symbol_filter or 'none'})")
             for name in csv_names:
                 try:
                     with zf.open(name) as f:
@@ -268,7 +286,9 @@ def _decompress_zst(data: bytes) -> bytes:
     """Decompress Zstandard (.zst) bytes."""
     if _ZST_AVAILABLE:
         dctx = zstd.ZstdDecompressor()
-        return dctx.decompress(data, max_output_size=500 * 1024 * 1024)
+        # Use streaming reader — one-shot decompress fails when content size not in frame
+        reader = dctx.stream_reader(io.BytesIO(data))
+        return reader.read()
     # Fallback: try subprocess (Windows has no built-in zstd)
     import subprocess, tempfile
     with tempfile.NamedTemporaryFile(suffix=".zst", delete=False) as tmp_in:
@@ -525,6 +545,7 @@ def seed_from_csv(
     ticker: str = "NQ",
     min_grade: str = "B",
     max_bars: int = None,
+    symbol_filter: str = None,
 ) -> dict:
     """
     Seed the SQLite DB with signal+outcome pairs from a historical CSV file.
@@ -543,7 +564,7 @@ def seed_from_csv(
 
     # ── Load data ──
     print(f"[seeder] Loading CSV: {filepath}")
-    df = load_csv(filepath)
+    df = load_csv(filepath, symbol_filter=symbol_filter)
     total_available = len(df)
 
     if max_bars:
