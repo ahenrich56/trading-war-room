@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 
 export const dynamic = 'force-dynamic';
 
-const FASTAPI_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const FASTAPI_URL = process.env.NEXT_PUBLIC_API_URL || "https://warroom-api.31-97-128-136.sslip.io";
 
 export async function GET(req: NextRequest) {
   try {

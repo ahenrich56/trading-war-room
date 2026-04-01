@@ -770,7 +770,7 @@ export function MiniChart({
   useEffect(() => {
     if (!chartRef.current || !chartData?.candles?.length) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://warroom-api.31-97-128-136.sslip.io";
     if (!apiUrl) return;
 
     // Build WS URL from API URL (https → wss, http → ws)
