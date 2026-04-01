@@ -27,7 +27,7 @@ from backtest import calculate_strategy_score, calculate_kelly, run_backtest
 from order_flow import compute_order_flow_summary, format_order_flow_for_ai, compute_delta_series, compute_mtf_order_flow
 from signal_scoring import calculate_enhanced_score
 from ml_signal_filter import (
-    predict_win_probability, auto_train_if_ready,
+    predict_win_probability, auto_train_if_ready, train_model,
     get_model_stats, is_model_ready, WIN_PROBABILITY_THRESHOLD,
 )
 from session_engine import get_current_session, compute_asian_range, format_session_for_ai
@@ -1261,6 +1261,117 @@ async def startup_event():
     """Start background tasks on application launch."""
     asyncio.create_task(monitor_active_trades(executor, resolve_ticker))
     asyncio.create_task(auto_scan_loop())
+
+
+# ═══════════════════════════════════════════════════════════
+#  ADMIN ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "warroom-admin-2026")
+
+def _check_admin(key: str):
+    from fastapi import HTTPException
+    if key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+
+
+@app.get("/api/v1/admin/dashboard")
+async def admin_dashboard(key: str = ""):
+    """Full admin overview: DB stats, ML model, signal quality, recent performance."""
+    _check_admin(key)
+    import sqlite3
+
+    conn = sqlite3.connect(DB_PATH)
+    total_signals = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    resolved_signals = conn.execute("SELECT COUNT(*) FROM signals WHERE resolved = 1").fetchone()[0]
+    total_outcomes = conn.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+
+    # Win rate from outcomes
+    wins = 0
+    losses = 0
+    if total_outcomes > 0:
+        rows = conn.execute("SELECT data FROM outcomes").fetchall()
+        for r in rows:
+            o = json.loads(r[0])
+            if o.get("result") == "WIN":
+                wins += 1
+            else:
+                losses += 1
+
+    # Grade distribution from signals
+    grade_dist = {"A+": 0, "A": 0, "B": 0, "C": 0, "other": 0}
+    if resolved_signals > 0:
+        sig_rows = conn.execute("SELECT data FROM signals WHERE resolved = 1 ORDER BY id DESC LIMIT 10000").fetchall()
+        for r in sig_rows:
+            s = json.loads(r[0])
+            g = s.get("signal_grade", "other")
+            if g in grade_dist:
+                grade_dist[g] += 1
+            else:
+                grade_dist["other"] += 1
+
+    # Recent signals (last 20)
+    recent_rows = conn.execute("SELECT data FROM signals ORDER BY id DESC LIMIT 20").fetchall()
+    recent_signals = []
+    for r in recent_rows:
+        s = json.loads(r[0])
+        recent_signals.append({
+            "ticker": s.get("ticker"),
+            "signal": s.get("signal"),
+            "grade": s.get("signal_grade"),
+            "score": s.get("score"),
+            "confidence": s.get("confidence"),
+            "timestamp": s.get("timestamp"),
+        })
+
+    conn.close()
+
+    ml_stats = get_model_stats()
+
+    return {
+        "db": {
+            "total_signals": total_signals,
+            "resolved_signals": resolved_signals,
+            "total_outcomes": total_outcomes,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / max(total_outcomes, 1) * 100, 1),
+        },
+        "grade_distribution": grade_dist,
+        "ml": ml_stats,
+        "ml_threshold": WIN_PROBABILITY_THRESHOLD,
+        "recent_signals": recent_signals,
+    }
+
+
+@app.post("/api/v1/admin/retrain")
+async def admin_retrain(key: str = ""):
+    """Force retrain the ML model on all available data."""
+    _check_admin(key)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, train_model, DB_PATH)
+    return {"status": "retrained", "result": result}
+
+
+@app.post("/api/v1/admin/clear-db")
+async def admin_clear_db(key: str = "", table: str = ""):
+    """Clear signals and/or outcomes tables. Use with caution."""
+    _check_admin(key)
+    from fastapi import HTTPException
+    import sqlite3
+
+    if table not in ("signals", "outcomes", "all"):
+        raise HTTPException(status_code=400, detail="table must be 'signals', 'outcomes', or 'all'")
+
+    conn = sqlite3.connect(DB_PATH)
+    if table in ("signals", "all"):
+        conn.execute("DELETE FROM signals")
+    if table in ("outcomes", "all"):
+        conn.execute("DELETE FROM outcomes")
+    conn.commit()
+    conn.close()
+
+    return {"status": "cleared", "table": table}
 
 
 @app.get("/health")
