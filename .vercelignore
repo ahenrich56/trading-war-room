@@ -1,0 +1,11 @@
+backend/war_room.db
+backend/war_room.db-shm
+backend/war_room.db-wal
+backend/ml_model.pkl
+backend/ml_meta.json
+*.py
+*.txt
+*.conf
+*.json.txt
+*.sql
+*.mjs
