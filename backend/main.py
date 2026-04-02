@@ -120,17 +120,189 @@ class SeedBacktestRequest(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════
-#  AI WRAPPER
+#  SPECIALIST TRADER PROMPTS
 # ═══════════════════════════════════════════════════════════
 
-async def ask_ai(role: str, prompt: str, max_tokens: int = 300, learning_context: str = "") -> str:
+SPECIALIST_PROMPTS = {
+    "ICT_TRADER": """You are an elite ICT/Smart Money Concepts trader with 15+ years experience. You think like Michael J. Huddleston.
+
+You ONLY trade based on:
+- Liquidity grabs (stop hunts above/below swing highs/lows)
+- Order blocks (institutional entry zones) and Fair Value Gaps (imbalances)
+- Break of Structure (BOS) / Change of Character (CHoCH)
+- Optimal Trade Entry (OTE) — 62-79% fib retracement into order block
+- Kill zone timing (London 02-05 EST, NY 07-10 EST, PM session 13:30-16 EST)
+- Judas swing — false move at session open to grab liquidity before real move
+- Power of 3 — accumulation, manipulation, distribution phases
+
+You validate order blocks with delta/volume. An OB without volume confirmation is weak.
+You prefer entries during kill zones. Outside kill zones, you need extra confluence.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), KEY_LEVELS (entry, SL, TP), and REASONING from an ICT perspective. Be specific about which concepts are active.""",
+
+    "ORDERFLOW_TRADER": """You are a master order flow trader who reads the tape like a book. You follow Auction Market Theory and footprint analysis.
+
+Your edge comes from:
+- Delta divergences (price up + delta down = weakness, vice versa)
+- CVD trend vs price trend (confirmation vs divergence)
+- Absorption zones (high volume + small range = institutional accumulation/distribution)
+- Volume profile (POC, VAH, VAL) — where value sits and price acceptance/rejection
+- Stacked imbalances — 3+ bars of one-sided delta = institutional conviction
+- VWAP deviation — mean reversion setups when price extends >2 sigma from VWAP
+- Footprint analysis — buy vs sell pressure at each price level
+
+Delta divergence is your highest-conviction signal. When price makes a new high but delta is declining, smart money is selling into retail buying.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), and REASONING citing specific order flow data.""",
+
+    "SCALPER": """You are a precision scalper specializing in momentum and mean reversion setups on intraday timeframes.
+
+Your methodology:
+- RSI extremes (<25 or >75) combined with divergences for reversal entries
+- Bollinger Band squeezes (tight bands) for breakout anticipation; price outside bands for mean reversion
+- EMA ribbon crossovers (9/21/50) — 9 crossing 21 with 50 confirming trend
+- StochRSI crosses in extreme zones (<20 or >80) for timing entries
+- ATR expansion/contraction — expanding ATR = trend, contracting = range (scalp)
+- Momentum flush + reclaim: sharp move that reclaims a key level = high-probability entry
+
+You size small and take quick profits. You avoid trading into strong trends against you.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), and REASONING citing specific indicator values.""",
+
+    "MACRO_TRADER": """You are a top-down macro analyst who trades based on fundamental context and intermarket flows.
+
+Your expertise:
+- DXY/SPX/VIX/Gold correlation with NQ — DXY up typically = NQ down, VIX spike = risk-off
+- FOMC, CPI, NFP event risk assessment — you reduce exposure ahead of major events
+- Risk-on vs risk-off regime detection — monitor credit spreads, treasury yields, equity flows
+- Treasury yield curve signals — inversion = recession risk, steepening = growth
+- Sector rotation implications — tech leadership vs defensive rotation
+- COT (Commitment of Traders) positioning — extreme positioning = potential reversal
+
+You are the voice of caution. If macro conditions are hostile, you say NO_TRADE regardless of technicals.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), EVENT_RISK (LOW/MEDIUM/HIGH), and REASONING citing macro factors.""",
+
+    "STRUCTURE_TRADER": """You are a classical price action and chart pattern specialist with deep expertise in multi-timeframe structure.
+
+Your methodology:
+- Support/resistance from swing highs and lows — these are your primary levels
+- Trend structure: higher highs/higher lows = uptrend; lower highs/lower lows = downtrend
+- Breakout + retest confirmation — clean break of level followed by successful retest
+- Candlestick setups: inside bars (consolidation), engulfing (reversal), pin bars (rejection)
+- Multi-timeframe structure alignment — higher TF trend > lower TF signal
+- Key round numbers and psychological levels (e.g., 20000, 20500 on NQ)
+- Range-bound vs trending markets — different setups for each
+
+You only take trades where structure is clear. Choppy, unclear structure = NO_TRADE.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), KEY_LEVELS (S/R), and REASONING.""",
+
+    "WHALE_TRACKER": """You are an institutional flow specialist who tracks smart money activity and unusual volume patterns.
+
+Your methodology:
+- Unusual volume spikes — 2x+ average volume at key levels signals institutional activity
+- Accumulation vs distribution patterns — high volume at lows = accumulation, at highs = distribution
+- Large delta imbalances at key levels — big buyers/sellers stepping in
+- Absorption detection — price doesn't move despite heavy volume = institutional absorption
+- Stacked imbalances — consecutive bars with one-sided flow = institutional conviction
+- COT net positioning changes — large speculators shifting = trend change signal
+- Dark pool / block trade inference from volume anomalies
+
+You look for where the big money is positioning, not where retail is trading.
+
+Output your analysis with: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), and REASONING citing institutional flow evidence.""",
+
+    "HEAD_TRADER": """You are the Head Trader of an elite trading desk. You have 6 specialist traders who just analyzed the market. Your job is to synthesize their views, identify consensus and dissent, and make the initial trade decision.
+
+RULES:
+- You need at least 4/6 specialists agreeing on direction to take a trade
+- If the ICT_TRADER and ORDERFLOW_TRADER disagree on direction, default to NO_TRADE — these are your two highest-signal specialists
+- Weight specialists higher when their methodology matches the current regime:
+  * TRENDING regime -> ICT_TRADER + STRUCTURE_TRADER carry more weight
+  * RANGING regime -> SCALPER + ORDERFLOW_TRADER carry more weight
+  * HIGH_VOLATILITY regime -> MACRO_TRADER + WHALE_TRACKER carry more weight
+- If any specialist flags HIGH event risk, reduce position size and confidence
+- Your confidence should reflect the degree of specialist agreement
+- Cite which specialists you agreed with and why you discounted any dissent
+
+Output: DIRECTION (LONG/SHORT/NO_TRADE), CONFIDENCE (0-100), ENTRY, STOP_LOSS, TAKE_PROFIT levels, and detailed REASONING referencing each specialist.""",
+
+    "BULL_ADVOCATE": """You are the Bull Advocate on an elite trading desk. The Head Trader just made a preliminary call. Your job is to make the STRONGEST possible case for going LONG, regardless of what the Head Trader decided.
+
+RULES:
+- Use evidence from the specialist analyses that support a bullish thesis
+- Identify bullish signals that may have been underweighted by the Head Trader
+- Point out if bearish concerns are overblown or already priced in
+- If the Head Trader said LONG, argue why confidence should be HIGHER
+- If the Head Trader said SHORT or NO_TRADE, argue why they are wrong
+- Be specific — cite data points, price levels, and specialist findings
+- Keep it concise: 3-5 strongest arguments max
+
+Output: Your BULL_CASE (3-5 bullet points) and CONVICTION (0-100).""",
+
+    "BEAR_ADVOCATE": """You are the Bear Advocate on an elite trading desk. The Head Trader just made a preliminary call. Your job is to make the STRONGEST possible case for going SHORT or staying flat (NO_TRADE), regardless of what the Head Trader decided.
+
+RULES:
+- Use evidence from the specialist analyses that support a bearish/cautious thesis
+- Identify risks, divergences, or weaknesses that may have been underweighted
+- Point out if bullish signals are fragile, low-conviction, or contradicted by order flow
+- If the Head Trader said SHORT, argue why confidence should be HIGHER
+- If the Head Trader said LONG or NO_TRADE, argue why they are wrong
+- Flag any macro risks, event risks, or structural weaknesses
+- Be specific — cite data points, price levels, and specialist findings
+- Keep it concise: 3-5 strongest arguments max
+
+Output: Your BEAR_CASE (3-5 bullet points) and CONVICTION (0-100).""",
+
+    "HEAD_TRADER_FINAL": """You are the Head Trader making your FINAL decision after the Devil's Advocate debate. You made an initial call, and now the Bull and Bear advocates have stress-tested it.
+
+Review their arguments and make your FINAL decision:
+- CONFIRM your initial call (same direction, same or adjusted confidence)
+- REVERSE your call (switch direction if the opposing advocate made compelling, irrefutable points)
+- DOWNGRADE to NO_TRADE (if the debate revealed unacceptable risk you initially missed)
+
+Your confidence should reflect how well your thesis survived the challenge:
+- If the opposing advocate made strong points you cannot refute, LOWER confidence or switch
+- If your thesis held up under scrutiny and the opposing case was weak, you may RAISE confidence
+- Note which specific debate points influenced your final decision
+
+Output: FINAL_DIRECTION (LONG/SHORT/NO_TRADE), FINAL_CONFIDENCE (0-100), ENTRY, STOP_LOSS, TAKE_PROFIT, and REASONING referencing the debate.""",
+
+    "SIGNAL_ENGINE": """You are the Signal Engine — the final structured output generator for an elite trading desk. You convert the Head Trader's final decision and Risk Manager's assessment into a precise, machine-readable JSON signal.
+
+You DO NOT make trading decisions. You faithfully encode the decisions already made by the specialist team into structured JSON format. Your job is accuracy and consistency in the output format.
+
+Output ONLY valid JSON, no markdown or surrounding text.""",
+
+    "RISK_MANAGER": """You are the Risk Manager on an elite trading desk. The Head Trader has made a final directional call after specialist analysis and adversarial debate. Your job is to evaluate risk and size the position.
+
+RULES:
+- Evaluate if the stop loss is placed at a logical level (beyond structure)
+- Check risk:reward ratio — minimum 1.5:1, prefer 2:1+
+- Size position based on ATR and account risk (max 2% account risk per trade)
+- If event risk is HIGH (FOMC, CPI, NFP within 2 hours), reduce size by 50%
+- If VIX is elevated (>25) or ATR is expanding rapidly, reduce size
+- You may VETO the trade entirely if risk is unacceptable (signal becomes NO_TRADE)
+- Provide max_hold_minutes based on timeframe and regime
+
+Output: APPROVED/VETOED, position_size_pct, adjusted SL/TP if needed, max_hold_minutes, and risk assessment.""",
+}
+
+
+# ═══════════════════════════════════════════════════════════
+#  AI SPECIALIST WRAPPER
+# ═══════════════════════════════════════════════════════════
+
+async def ask_specialist(role: str, prompt: str, max_tokens: int = 400, learning_context: str = "") -> str:
+    """Query a specialist trader agent with their methodology-specific system prompt."""
     if not client:
         await asyncio.sleep(1)
         return f"[{role}] Mock response - missing API key."
     try:
-        system_msg = f"You are a hedge fund {role}. Provide decisive, data-driven analysis. Reference exact indicator values provided. Be specific about price levels."
+        system_msg = SPECIALIST_PROMPTS.get(role, f"You are a hedge fund {role}. Provide decisive, data-driven analysis.")
         if learning_context:
-            system_msg += f"\n\n{learning_context}"
+            system_msg += f"\n\nHISTORICAL PERFORMANCE CONTEXT:\n{learning_context}"
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=max_tokens,
@@ -384,56 +556,183 @@ async def generate_analysis_stream(req: AnalysisRequest):
         # ── 0b. Fetch self-learning context from outcomes DB ──
         learning_ctx = get_learning_context()
 
+        # ── Load Obsidian agent performance if available ──
+        obsidian_ctx = ""
+        try:
+            obsidian_path = os.path.join(os.path.expanduser("~"), "Documents", "Obsidian-Brain", "Trading-War-Room-Agent-Performance.md")
+            if os.path.exists(obsidian_path):
+                with open(obsidian_path, "r", encoding="utf-8") as f:
+                    obsidian_ctx = f.read()[-2000:]  # last 2000 chars = most recent performance
+        except Exception:
+            pass
+
+        combined_learning = learning_ctx
+        if obsidian_ctx:
+            combined_learning += f"\n\nAGENT PERFORMANCE HISTORY:\n{obsidian_ctx}"
+
         price_anchor = (
             f"\nCRITICAL: CURRENT LIVE PRICE of {ticker} is {current_price}. "
             f"ALL prices MUST be within realistic range of {current_price}. DO NOT hallucinate."
         )
 
-        # ── 1. ANALYST TEAM ──
-        analysts = {
-            "FUNDAMENTAL_ANALYST": f"Analyze {ticker} fundamentals. Price: {current_price}.\n{mtf_summary}\n{market_context}",
-            "SENTIMENT_ANALYST": f"Analyze sentiment for {ticker}. Price: {current_price}. Vol ratio: {primary.get('volume_ratio', 'N/A')}x. RSI: {primary.get('RSI_14', 'N/A')}.\n{market_context}",
-            "NEWS_ANALYST": f"Analyze macro factors for {ticker}. Price: {current_price}.\n{market_context}\n{econ_calendar}",
-            "TECHNICAL_ANALYST": f"Technical analysis for {ticker} using REAL computed indicators, Smart Money Concepts, AND Order Flow below. Reference exact values, mention structure (BOS/CHoCH), order blocks, FVGs, delta bias, CVD trend, volume profile (POC/VAH/VAL), and any divergences or absorption zones.\n{mtf_summary}\n{ict_text}\n{order_flow_text}{price_anchor}",
+        atr_val = primary.get("ATR_14", 0)
+
+        # ── 1. SIX SPECIALIST TRADERS (parallel) ──
+        specialist_prompts = {
+            "ICT_TRADER": (
+                f"Analyze {ticker} at {current_price} on {tf} using ICT/Smart Money methodology.\n\n"
+                f"ICT DATA:\n{ict_text}\n\n"
+                f"ORDER FLOW (for OB validation):\n{order_flow_text}\n\n"
+                f"SESSION:\n{session_text}\n\n"
+                f"SWING POINTS & STRUCTURE:\n{mtf_summary}\n"
+                f"ATR(14): {atr_val}{price_anchor}"
+            ),
+            "ORDERFLOW_TRADER": (
+                f"Analyze {ticker} at {current_price} on {tf} using Order Flow / Auction Market Theory.\n\n"
+                f"ORDER FLOW DATA:\n{order_flow_text}\n\n"
+                f"MTF ORDER FLOW:\n{mtf_of_text}\n\n"
+                f"VOLUME PROFILE: POC={order_flow_data.get('summary', {}).get('poc', 'N/A')}, "
+                f"VAH={order_flow_data.get('summary', {}).get('vah', 'N/A')}, "
+                f"VAL={order_flow_data.get('summary', {}).get('val', 'N/A')}\n"
+                f"VWAP Deviation: {order_flow_data.get('summary', {}).get('vwap_deviation', 0)} sigma\n"
+                f"Divergences: {len(order_flow_data.get('divergences', []))}\n"
+                f"Absorptions: {len(order_flow_data.get('absorptions', []))}\n"
+                f"ATR(14): {atr_val}{price_anchor}"
+            ),
+            "SCALPER": (
+                f"Analyze {ticker} at {current_price} on {tf} for momentum/scalp setups.\n\n"
+                f"INDICATORS:\n{mtf_summary}\n\n"
+                f"RSI(14): {primary.get('RSI_14', 'N/A')}\n"
+                f"MACD histogram: {primary.get('MACD_histogram', 'N/A')}\n"
+                f"BB upper: {primary.get('BB_upper', 'N/A')}, BB lower: {primary.get('BB_lower', 'N/A')}\n"
+                f"StochRSI: {primary.get('StochRSI_K', 'N/A')}/{primary.get('StochRSI_D', 'N/A')}\n"
+                f"EMA 9/21 cross: {primary.get('EMA_9_21_cross', 'N/A')}\n"
+                f"ATR(14): {atr_val}, ADX: {primary.get('ADX', 'N/A')}\n"
+                f"Price vs VWAP: {primary.get('price_vs_VWAP', 'N/A')}{price_anchor}"
+            ),
+            "MACRO_TRADER": (
+                f"Analyze macro context for {ticker} at {current_price} on {tf}.\n\n"
+                f"MARKET CONTEXT:\n{market_context}\n\n"
+                f"ECONOMIC CALENDAR:\n{econ_calendar}\n\n"
+                f"INTERMARKET CORRELATIONS:\n{correlation_text}\n\n"
+                f"COT DATA:\n{cot_text}{price_anchor}"
+            ),
+            "STRUCTURE_TRADER": (
+                f"Analyze price structure for {ticker} at {current_price} on {tf}.\n\n"
+                f"MTF SUMMARY:\n{mtf_summary}\n\n"
+                f"ICT STRUCTURE (swing points, BOS/CHoCH):\n{ict_text}\n\n"
+                f"EMA 9: {primary.get('EMA_9', 'N/A')}, EMA 21: {primary.get('EMA_21', 'N/A')}, "
+                f"EMA 50: {primary.get('EMA_50', 'N/A')}\n"
+                f"ATR(14): {atr_val}, ADX: {primary.get('ADX', 'N/A')}{price_anchor}"
+            ),
+            "WHALE_TRACKER": (
+                f"Analyze institutional flow for {ticker} at {current_price} on {tf}.\n\n"
+                f"WHALE ALERTS:\n{whale_text if whale_text else 'No whale alerts detected'}\n\n"
+                f"ORDER FLOW (absorption/imbalances):\n{order_flow_text}\n\n"
+                f"COT DATA:\n{cot_text}\n\n"
+                f"Volume ratio: {primary.get('volume_ratio', 'N/A')}x average{price_anchor}"
+            ),
         }
 
-        analyst_outputs = {}
-        for role, prompt in analysts.items():
-            text = await ask_ai(role, prompt, learning_context=learning_ctx)
-            analyst_outputs[role] = text
+        # Run all 6 specialists in parallel
+        specialist_keys = list(specialist_prompts.keys())
+        specialist_tasks = [
+            ask_specialist(role, prompt, max_tokens=400, learning_context=combined_learning)
+            for role, prompt in specialist_prompts.items()
+        ]
+        specialist_results_list = await asyncio.gather(*specialist_tasks)
+
+        specialist_outputs = {}
+        specialist_votes = {}
+        for i, role in enumerate(specialist_keys):
+            text = specialist_results_list[i]
+            specialist_outputs[role] = text
             yield emit(role, {"text": text})
+            # Parse direction and confidence from output for vote tracking
+            _dir = "NO_TRADE"
+            _conf = 50
+            upper = text.upper()
+            if "DIRECTION: LONG" in upper or "DIRECTION (LONG" in upper or "\nLONG\n" in upper or "FINAL_DIRECTION: LONG" in upper:
+                _dir = "LONG"
+            elif "DIRECTION: SHORT" in upper or "DIRECTION (SHORT" in upper or "\nSHORT\n" in upper or "FINAL_DIRECTION: SHORT" in upper:
+                _dir = "SHORT"
+            import re as _re
+            conf_match = _re.search(r'CONFIDENCE[:\s]*(\d+)', upper)
+            if conf_match:
+                _conf = int(conf_match.group(1))
+            specialist_votes[role] = {"direction": _dir, "confidence": _conf}
 
-        # ── 2. RESEARCHER DEBATE ──
-        context_str = json.dumps(analyst_outputs)
+        # ── 2. HEAD TRADER — Initial Synthesis ──
+        specialist_summary = "\n\n".join([
+            f"=== {role} ===\n{text}" for role, text in specialist_outputs.items()
+        ])
 
-        bear_text = await ask_ai("BEAR_RESEARCHER",
-            f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
-            f"Argue BEARISH case against {ticker} at {current_price}. Use specific indicator values.", 300, learning_context=learning_ctx)
-        yield emit("BEAR_RESEARCHER", {"text": bear_text})
+        head_trader_prompt = (
+            f"You have 6 specialist traders who analyzed {ticker} at {current_price} on {tf}.\n\n"
+            f"SPECIALIST ANALYSES:\n{specialist_summary}\n\n"
+            f"ENHANCED SCORING:\n"
+            f"- Strategy Direction: {strat_dir}\n"
+            f"- Strategy Score: {strat_score} (-100 to +100)\n"
+            f"- Signal Grade: {signal_grade}\n"
+            f"- Market Regime: {market_regime}\n"
+            f"- Factors Aligned: {factors_aligned}/5\n"
+            f"- Order Flow Agrees: {order_flow_agrees}\n\n"
+            f"SPECIALIST VOTES: {json.dumps(specialist_votes)}\n\n"
+            f"ATR(14): {atr_val}{price_anchor}\n\n"
+            f"Synthesize all specialist views and make your INITIAL trade decision."
+        )
 
-        bull_text = await ask_ai("BULL_RESEARCHER",
-            f"Using analyst data and REAL indicators: {context_str}\n{full_data}\n"
-            f"Argue BULLISH case for {ticker} at {current_price}. Use specific indicator values.", 300, learning_context=learning_ctx)
-        yield emit("BULL_RESEARCHER", {"text": bull_text})
+        head_trader_text = await ask_specialist("HEAD_TRADER", head_trader_prompt, max_tokens=500, learning_context=combined_learning)
+        yield emit("HEAD_TRADER", {"text": head_trader_text})
 
-        # ── 3. TRADER & RISK ──
-        trader_text = await ask_ai("TRADER_DECISION",
-            f"Review bull/bear for {ticker}. Price: {current_price}. "
-            f"Strategy says: {strat_dir} (score {strat_score}). AI must agree with strategy direction or choose NO_TRADE. "
-            f"ATR={primary.get('ATR_14', 'N/A')}, BB upper={primary.get('BB_upper', 'N/A')}, "
-            f"BB lower={primary.get('BB_lower', 'N/A')}, VWAP={primary.get('VWAP', 'N/A')}. "
-            f"Timeframe: {tf}. Be decisive.", 250, learning_context=learning_ctx)
-        yield emit("TRADER_DECISION", {"text": trader_text})
+        # ── 3. DEVIL'S ADVOCATE DEBATE (parallel) ──
+        debate_context = (
+            f"HEAD TRADER'S INITIAL CALL:\n{head_trader_text}\n\n"
+            f"SPECIALIST ANALYSES:\n{specialist_summary}\n\n"
+            f"Market: {ticker} at {current_price}, Regime: {market_regime}, Grade: {signal_grade}"
+        )
 
-        atr_val = primary.get("ATR_14", 0)
-        risk_text = await ask_ai("RISK_MANAGER",
-            f"Review trader plan for {ticker} at {current_price} ({strat_dir}). ATR(14)={atr_val}. "
-            f"Risk profile: {risk}.\n{market_context}\nApprove? Size recommendation.", 250, learning_context=learning_ctx)
+        bull_task = ask_specialist("BULL_ADVOCATE",
+            f"The Head Trader just made this call on {ticker}:\n\n{debate_context}\n\n"
+            f"Make the STRONGEST possible BULLISH case.{price_anchor}",
+            max_tokens=350, learning_context=combined_learning)
+
+        bear_task = ask_specialist("BEAR_ADVOCATE",
+            f"The Head Trader just made this call on {ticker}:\n\n{debate_context}\n\n"
+            f"Make the STRONGEST possible BEARISH / cautious case.{price_anchor}",
+            max_tokens=350, learning_context=combined_learning)
+
+        bull_text, bear_text = await asyncio.gather(bull_task, bear_task)
+        yield emit("BULL_ADVOCATE", {"text": bull_text})
+        yield emit("BEAR_ADVOCATE", {"text": bear_text})
+
+        # ── 4. HEAD TRADER FINAL — Post-Debate Decision ──
+        final_prompt = (
+            f"You made this INITIAL call on {ticker} at {current_price}:\n{head_trader_text}\n\n"
+            f"BULL ADVOCATE argued:\n{bull_text}\n\n"
+            f"BEAR ADVOCATE argued:\n{bear_text}\n\n"
+            f"SPECIALIST VOTES: {json.dumps(specialist_votes)}\n"
+            f"Strategy Direction: {strat_dir}, Score: {strat_score}, Grade: {signal_grade}\n"
+            f"ATR(14): {atr_val}{price_anchor}\n\n"
+            f"Make your FINAL decision. You may CONFIRM, REVERSE, or DOWNGRADE to NO_TRADE."
+        )
+
+        head_final_text = await ask_specialist("HEAD_TRADER_FINAL", final_prompt, max_tokens=500, learning_context=combined_learning)
+        yield emit("HEAD_TRADER_FINAL", {"text": head_final_text})
+
+        # ── 5. RISK MANAGER ──
+        risk_text = await ask_specialist("RISK_MANAGER",
+            f"The Head Trader's FINAL decision on {ticker} at {current_price} ({tf}):\n{head_final_text}\n\n"
+            f"ATR(14): {atr_val}. Risk profile: {risk}.\n"
+            f"Market regime: {market_regime}. Signal grade: {signal_grade}.\n"
+            f"Event risk from MACRO_TRADER: {specialist_outputs.get('MACRO_TRADER', 'N/A')[:200]}\n"
+            f"{market_context}\n\n"
+            f"Approve or veto? Size recommendation.",
+            max_tokens=300, learning_context=combined_learning)
         yield emit("RISK_MANAGER", {"text": risk_text})
 
-        # ── 4. SIGNAL ENGINE ──
+        # ── 6. SIGNAL ENGINE ──
         atr_num = float(atr_val) if atr_val and atr_val != "N/A" else (float(current_price) * 0.005 if isinstance(current_price, (int, float)) else 50)
-        cp = float(current_price) if isinstance(current_price, (int, float)) else 0
 
         # Get structure-aware SL/TP levels
         structure_levels = enhanced.get("structure_levels", {})
@@ -452,6 +751,14 @@ async def generate_analysis_stream(req: AnalysisRequest):
 
         json_prompt = f"""
 Based on all context for {ticker} on {tf}, risk profile '{risk}':
+
+HEAD TRADER FINAL DECISION:
+{head_final_text[:600]}
+
+RISK MANAGER ASSESSMENT:
+{risk_text[:400]}
+
+SPECIALIST AGREEMENT: {json.dumps(specialist_votes)}
 
 CRITICAL PRICE DATA:
 - Current price: {current_price}
@@ -493,10 +800,10 @@ ENHANCED STRATEGY SCORING (5-Factor Confluence):
 - Key Drivers: {', '.join(strat_reasons[:6])}
 
 RULES:
-- YOUR FINAL SIGNAL MUST EXACTLY MATCH THE STRATEGY DIRECTION ({strat_dir}).
+- YOUR SIGNAL MUST MATCH THE HEAD TRADER'S FINAL DIRECTION. If Head Trader said NO_TRADE, output NO_TRADE.
 - IF SIGNAL GRADE IS 'F', USE 'NO_TRADE'. Grade C may still produce cautious trades.
+- IF THE RISK MANAGER VETOED, USE 'NO_TRADE'.
 - IF THE RISK IS TOO HIGH OR CONTEXT IS BAD, YOU MAY DOWNGRADE TO 'NO_TRADE'.
-- YOU MAY NEVER CALL A 'LONG' IF THE STRATEGY IS 'SHORT', OR VICE VERSA.
 - Confidence MUST be >= 25 for any trade signal (LONG/SHORT). If unsure, use NO_TRADE.
 - R:R (risk_reward) MUST be >= 1.5 for any trade signal.
 - SL MUST be placed beyond the nearest ICT structure level (order block or FVG). Use the suggested SL above.
@@ -525,7 +832,7 @@ Output ONLY valid JSON, no markdown:
     "indicators_used": {{"RSI_14": {primary.get('RSI_14', 'null')}, "MACD_histogram": {primary.get('MACD_histogram', 'null')}, "ATR_14": {primary.get('ATR_14', 'null')}, "ADX": {primary.get('ADX', 'null')}}}
 }}
 """
-        signal_text = await ask_ai("SIGNAL_ENGINE", json_prompt, 1200, learning_context=learning_ctx)
+        signal_text = await ask_specialist("SIGNAL_ENGINE", json_prompt, max_tokens=1200, learning_context=combined_learning)
         clean_json = signal_text.replace("```json", "").replace("```", "").strip()
 
         # Try to extract JSON object if model added surrounding text
@@ -567,6 +874,18 @@ Output ONLY valid JSON, no markdown:
 
         # ── Post-AI Signal Validation ──
         signal_data = _validate_signal(signal_data, signal_grade, structure_levels, atr_num)
+
+        # Inject ICT features for ML training
+        signal_data["liquidity_grabs"] = ict_data.get("liquidity_grabs", [])
+        signal_data["swing_failure_patterns"] = ict_data.get("swing_failure_patterns", [])
+        signal_data["judas_swing"] = ict_data.get("judas_swing")
+
+        # Inject specialist votes + debate data for self-learning
+        signal_data["specialist_votes"] = specialist_votes
+        signal_data["head_trader_initial"] = head_trader_text[:500]
+        signal_data["bull_advocate"] = bull_text[:500]
+        signal_data["bear_advocate"] = bear_text[:500]
+        signal_data["head_trader_final"] = head_final_text[:500]
 
         # Inject enhanced scoring metadata into signal
         signal_data["signal_grade"] = signal_grade
@@ -612,6 +931,87 @@ Output ONLY valid JSON, no markdown:
 
     except Exception as e:
         yield emit("ERROR", {"text": f"Backend stream failed: {str(e)}"})
+
+
+# ═══════════════════════════════════════════════════════════
+#  SELF-LEARNING: OBSIDIAN AGENT PERFORMANCE MEMORY
+# ═══════════════════════════════════════════════════════════
+
+def _update_obsidian_agent_performance():
+    """Compute per-specialist accuracy from resolved signals and write to Obsidian vault."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        signals_raw = conn.execute(
+            "SELECT data FROM signals WHERE resolved = 1 ORDER BY id DESC LIMIT 200"
+        ).fetchall()
+        outcomes_raw = conn.execute(
+            "SELECT data FROM outcomes ORDER BY id DESC LIMIT 200"
+        ).fetchall()
+        conn.close()
+
+        if len(signals_raw) < 5 or len(outcomes_raw) < 5:
+            return  # Not enough data yet
+
+        signals = [json.loads(r[0]) for r in signals_raw]
+        outcomes = [json.loads(r[0]) for r in outcomes_raw]
+
+        # Track per-agent accuracy
+        agent_stats = {}
+        specialist_names = ["ICT_TRADER", "ORDERFLOW_TRADER", "SCALPER", "MACRO_TRADER", "STRUCTURE_TRADER", "WHALE_TRACKER"]
+
+        for i in range(min(len(signals), len(outcomes))):
+            sig = signals[i]
+            out = outcomes[i]
+            votes = sig.get("specialist_votes", {})
+            final_dir = sig.get("signal", "NO_TRADE")
+            result = out.get("result", "")
+
+            if final_dir == "NO_TRADE" or result not in ("WIN", "LOSS"):
+                continue
+
+            for agent_name in specialist_names:
+                if agent_name not in votes:
+                    continue
+                if agent_name not in agent_stats:
+                    agent_stats[agent_name] = {"agreed": 0, "wins_when_agreed": 0, "total": 0}
+
+                agent_stats[agent_name]["total"] += 1
+                if votes[agent_name].get("direction") == final_dir:
+                    agent_stats[agent_name]["agreed"] += 1
+                    if result == "WIN":
+                        agent_stats[agent_name]["wins_when_agreed"] += 1
+
+        if not agent_stats:
+            return
+
+        # Build markdown table
+        lines = [
+            f"## Agent Performance — Updated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+            "",
+            "| Agent | Signals Agreed | Win Rate When Agreed | Reliability |",
+            "|-------|---------------|---------------------|-------------|",
+        ]
+
+        for agent in specialist_names:
+            stats = agent_stats.get(agent, {"agreed": 0, "wins_when_agreed": 0, "total": 0})
+            agreed = stats["agreed"]
+            wr = round(stats["wins_when_agreed"] / max(agreed, 1) * 100, 1)
+            reliability = "HIGH" if wr >= 50 else "MEDIUM" if wr >= 40 else "LOW"
+            lines.append(f"| {agent} | {agreed}/{stats['total']} | {wr}% | {reliability} |")
+
+        lines.append("")
+        lines.append(f"Total resolved signals analyzed: {min(len(signals), len(outcomes))}")
+
+        obsidian_dir = os.path.join(os.path.expanduser("~"), "Documents", "Obsidian-Brain")
+        os.makedirs(obsidian_dir, exist_ok=True)
+        obsidian_path = os.path.join(obsidian_dir, "Trading-War-Room-Agent-Performance.md")
+
+        with open(obsidian_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    except Exception as e:
+        print(f"Obsidian agent performance update failed: {e}")
 
 
 # Initialize DB on import
@@ -1113,6 +1513,8 @@ async def report_outcome_endpoint(report: OutcomeReport):
     # Trigger ML retraining in background whenever a new outcome is recorded
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, auto_train_if_ready, DB_PATH)
+    # Update Obsidian agent performance memory in background
+    loop.run_in_executor(executor, _update_obsidian_agent_performance)
     return result
 
 @app.get("/api/v1/outcomes")

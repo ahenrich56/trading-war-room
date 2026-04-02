@@ -22,13 +22,16 @@ import { GlassFilter } from "@/components/ui/liquid-glass";
 import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar } from "lucide-react";
 
 const ALL_STAGES = [
-  "FUNDAMENTAL_ANALYST",
-  "SENTIMENT_ANALYST",
-  "NEWS_ANALYST",
-  "TECHNICAL_ANALYST",
-  "BEAR_RESEARCHER",
-  "BULL_RESEARCHER",
-  "TRADER_DECISION",
+  "ICT_TRADER",
+  "ORDERFLOW_TRADER",
+  "SCALPER",
+  "MACRO_TRADER",
+  "STRUCTURE_TRADER",
+  "WHALE_TRACKER",
+  "HEAD_TRADER",
+  "BULL_ADVOCATE",
+  "BEAR_ADVOCATE",
+  "HEAD_TRADER_FINAL",
   "RISK_MANAGER",
   "SIGNAL_ENGINE"
 ];

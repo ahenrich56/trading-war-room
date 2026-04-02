@@ -204,6 +204,154 @@ def _validate_fvgs_with_flow(fvgs: list, df: pd.DataFrame, delta_df: pd.DataFram
     return fvgs
 
 
+def _detect_liquidity_grabs(df: pd.DataFrame, lookback: int = 5) -> list:
+    """
+    Detect liquidity grabs: price sweeps a swing high/low then reverses within 2 bars.
+    A liquidity grab is where price takes out stops above/below a swing point and quickly reverses.
+    """
+    grabs = []
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    swings = _detect_swing_points(high, low, lookback)
+
+    # Check if recent bars swept a swing high then reversed down
+    for sh in swings["swing_highs"]:
+        sh_idx = sh["index"]
+        sh_price = sh["price"]
+        # Look at bars after this swing high
+        for j in range(sh_idx + 1, min(sh_idx + 6, len(df))):
+            if float(high.iloc[j]) > sh_price:
+                # Price swept above swing high — check if it reversed (closed below)
+                sweep_dist = float(high.iloc[j]) - sh_price
+                # Check next 1-2 bars for reversal
+                for k in range(j, min(j + 3, len(df))):
+                    if float(close.iloc[k]) < sh_price:
+                        grabs.append({
+                            "type": "BEARISH_GRAB",
+                            "level": sh_price,
+                            "sweep_high": round(float(high.iloc[j]), 2),
+                            "magnitude": round(sweep_dist, 2),
+                            "index": j,
+                            "detail": f"Swept swing high {sh_price}, reversed below. Grab magnitude: {sweep_dist:.2f}",
+                        })
+                        break
+                break
+
+    # Check if recent bars swept a swing low then reversed up
+    for sl in swings["swing_lows"]:
+        sl_idx = sl["index"]
+        sl_price = sl["price"]
+        for j in range(sl_idx + 1, min(sl_idx + 6, len(df))):
+            if float(low.iloc[j]) < sl_price:
+                sweep_dist = sl_price - float(low.iloc[j])
+                for k in range(j, min(j + 3, len(df))):
+                    if float(close.iloc[k]) > sl_price:
+                        grabs.append({
+                            "type": "BULLISH_GRAB",
+                            "level": sl_price,
+                            "sweep_low": round(float(low.iloc[j]), 2),
+                            "magnitude": round(sweep_dist, 2),
+                            "index": j,
+                            "detail": f"Swept swing low {sl_price}, reversed above. Grab magnitude: {sweep_dist:.2f}",
+                        })
+                        break
+                break
+
+    return grabs[-4:]
+
+
+def _detect_swing_failure_patterns(df: pd.DataFrame, lookback: int = 5) -> list:
+    """
+    Detect Swing Failure Patterns (SFP): price makes a new high/low but fails to hold the close.
+    SFP = wick beyond previous swing, but close back inside range.
+    """
+    sfps = []
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    swings = _detect_swing_points(high, low, lookback)
+
+    # Bearish SFP: wick above previous swing high, close below it
+    for i in range(len(df) - 5, len(df)):
+        if i < 0:
+            continue
+        for sh in swings["swing_highs"]:
+            if sh["index"] >= i:
+                continue
+            if float(high.iloc[i]) > sh["price"] and float(close.iloc[i]) < sh["price"]:
+                sfps.append({
+                    "type": "BEARISH_SFP",
+                    "level": sh["price"],
+                    "wick_high": round(float(high.iloc[i]), 2),
+                    "close": round(float(close.iloc[i]), 2),
+                    "index": i,
+                    "detail": f"Wicked above {sh['price']} to {float(high.iloc[i]):.2f} but closed at {float(close.iloc[i]):.2f}",
+                })
+                break
+
+    # Bullish SFP: wick below previous swing low, close above it
+    for i in range(len(df) - 5, len(df)):
+        if i < 0:
+            continue
+        for sl in swings["swing_lows"]:
+            if sl["index"] >= i:
+                continue
+            if float(low.iloc[i]) < sl["price"] and float(close.iloc[i]) > sl["price"]:
+                sfps.append({
+                    "type": "BULLISH_SFP",
+                    "level": sl["price"],
+                    "wick_low": round(float(low.iloc[i]), 2),
+                    "close": round(float(close.iloc[i]), 2),
+                    "index": i,
+                    "detail": f"Wicked below {sl['price']} to {float(low.iloc[i]):.2f} but closed at {float(close.iloc[i]):.2f}",
+                })
+                break
+
+    return sfps[-4:]
+
+
+def _detect_judas_swing(df: pd.DataFrame) -> dict | None:
+    """
+    Detect Judas Swing: the first 15-min move at a session open that reverses.
+    A Judas swing is the initial fake move designed to trap early traders before the real move.
+    We check if the first few bars of a session moved one direction then reversed.
+    """
+    if len(df) < 10:
+        return None
+
+    # Look at recent bars: compare first 3 bars direction vs next 3 bars direction
+    try:
+        first_open = float(df["Open"].iloc[-8])
+        first_3_close = float(df["Close"].iloc[-6])
+        next_3_close = float(df["Close"].iloc[-3])
+
+        initial_move = first_3_close - first_open
+        subsequent_move = next_3_close - first_3_close
+
+        # Judas swing: initial move and subsequent move are in opposite directions
+        # and the reversal is larger than the initial move
+        if initial_move != 0 and subsequent_move != 0:
+            if (initial_move > 0 and subsequent_move < 0 and abs(subsequent_move) > abs(initial_move)):
+                return {
+                    "type": "BEARISH_JUDAS",
+                    "initial_move": round(initial_move, 2),
+                    "reversal_move": round(subsequent_move, 2),
+                    "detail": f"Initial push UP {initial_move:.2f} pts reversed DOWN {subsequent_move:.2f} pts — Judas swing detected",
+                }
+            elif (initial_move < 0 and subsequent_move > 0 and abs(subsequent_move) > abs(initial_move)):
+                return {
+                    "type": "BULLISH_JUDAS",
+                    "initial_move": round(initial_move, 2),
+                    "reversal_move": round(subsequent_move, 2),
+                    "detail": f"Initial push DOWN {initial_move:.2f} pts reversed UP {subsequent_move:.2f} pts — Judas swing detected",
+                }
+    except (IndexError, ValueError):
+        pass
+
+    return None
+
+
 def detect_ict_concepts(df: pd.DataFrame, order_flow_df: pd.DataFrame = None) -> dict:
     """
     Run all ICT/SMC detection algorithms on OHLCV data.
@@ -222,6 +370,9 @@ def detect_ict_concepts(df: pd.DataFrame, order_flow_df: pd.DataFrame = None) ->
         structure = _detect_structure(high, low)
         order_blocks = _detect_order_blocks(df)
         fvgs = _detect_fvg(df)
+        liquidity_grabs = _detect_liquidity_grabs(df)
+        sfps = _detect_swing_failure_patterns(df)
+        judas_swing = _detect_judas_swing(df)
 
         # Cross-validate with order flow if available
         if order_flow_df is not None and not order_flow_df.empty:
@@ -240,6 +391,9 @@ def detect_ict_concepts(df: pd.DataFrame, order_flow_df: pd.DataFrame = None) ->
             "structure_events": structure,
             "order_blocks": order_blocks,
             "fair_value_gaps": fvgs,
+            "liquidity_grabs": liquidity_grabs,
+            "swing_failure_patterns": sfps,
+            "judas_swing": judas_swing,
             "recent_swing_highs": swings["swing_highs"][-3:],
             "recent_swing_lows": swings["swing_lows"][-3:],
         }
@@ -268,6 +422,16 @@ def format_ict_for_ai(ict_data: dict) -> str:
         strength = fvg.get("strength", "")
         strength_tag = f" [{strength}]" if strength else ""
         lines.append(f"  {fvg['type']}: Gap {fvg['bottom']}-{fvg['top']} (size: {fvg['size']}){strength_tag}")
+
+    for grab in ict_data.get("liquidity_grabs", []):
+        lines.append(f"  {grab['type']}: {grab['detail']}")
+
+    for sfp in ict_data.get("swing_failure_patterns", []):
+        lines.append(f"  {sfp['type']}: {sfp['detail']}")
+
+    judas = ict_data.get("judas_swing")
+    if judas:
+        lines.append(f"  {judas['type']}: {judas['detail']}")
 
     shs = ict_data.get("recent_swing_highs", [])
     sls = ict_data.get("recent_swing_lows", [])

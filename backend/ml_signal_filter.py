@@ -119,8 +119,75 @@ def extract_features(signal: dict) -> Optional[dict]:
 
         # ── Structure levels quality ──
         "sl_fallback_used":   1.0 if structure.get("fallback_used") else 0.0,
+
+        # ── Time features ──
+        "hour_utc":           _extract_hour(signal),
+        "day_of_week":        _extract_dow(signal),
+
+        # ── Specialist agreement (new pipeline) ──
+        "specialist_agreement": _count_specialist_agreement(signal),
+        "ict_confidence":       _get_specialist_confidence(signal, "ICT_TRADER"),
+        "orderflow_confidence": _get_specialist_confidence(signal, "ORDERFLOW_TRADER"),
+
+        # ── Liquidity grab / SFP features ──
+        "liquidity_grab_present": _has_ict_feature(signal, "liquidity_grabs"),
+        "sfp_present":            _has_ict_feature(signal, "swing_failure_patterns"),
+        "judas_swing_present":    1.0 if _get_nested(signal, "judas_swing") else 0.0,
     }
     return features
+
+
+def _extract_hour(signal: dict) -> float:
+    """Extract hour (UTC) from signal timestamp."""
+    ts = signal.get("timestamp_utc", "")
+    try:
+        from datetime import datetime as _dt
+        dt = _dt.fromisoformat(ts.rstrip("Z"))
+        return float(dt.hour)
+    except Exception:
+        return 12.0
+
+
+def _extract_dow(signal: dict) -> float:
+    """Extract day of week (0=Mon, 6=Sun) from signal timestamp."""
+    ts = signal.get("timestamp_utc", "")
+    try:
+        from datetime import datetime as _dt
+        dt = _dt.fromisoformat(ts.rstrip("Z"))
+        return float(dt.weekday())
+    except Exception:
+        return 2.0
+
+
+def _count_specialist_agreement(signal: dict) -> float:
+    """Count how many specialists agreed with the final signal direction."""
+    votes = signal.get("specialist_votes", {})
+    final_dir = signal.get("signal", "NO_TRADE")
+    if not votes or final_dir == "NO_TRADE":
+        return 0.0
+    return float(sum(1 for v in votes.values() if v.get("direction") == final_dir))
+
+
+def _get_specialist_confidence(signal: dict, specialist: str) -> float:
+    """Get a specific specialist's confidence score."""
+    votes = signal.get("specialist_votes", {})
+    return float(votes.get(specialist, {}).get("confidence", 50))
+
+
+def _has_ict_feature(signal: dict, key: str) -> float:
+    """Check if ICT data within the signal's raw data has a given feature list."""
+    # The ICT data is embedded in the signal during analysis
+    raw = signal.get("raw_indicators", {})
+    # Check top-level signal data (we store ict features at signal level)
+    items = signal.get(key, [])
+    if items and len(items) > 0:
+        return 1.0
+    return 0.0
+
+
+def _get_nested(signal: dict, key: str):
+    """Get a nested value from signal dict."""
+    return signal.get(key)
 
 
 # ═══════════════════════════════════════════════════════════

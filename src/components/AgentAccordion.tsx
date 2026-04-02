@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { ChevronDown, Check, BarChart3, MessageCircle, Newspaper, LineChart, TrendingDown, TrendingUp, Crosshair, Shield } from "lucide-react";
+import { ChevronDown, Check, Brain, BarChart3, Zap, Globe, LineChart, Eye, Crown, TrendingUp, TrendingDown, Shield } from "lucide-react";
 
 interface AgentAccordionProps {
   agentData: Record<string, any>;
@@ -9,14 +9,17 @@ interface AgentAccordionProps {
 }
 
 const AGENTS = [
-  { key: "FUNDAMENTAL_ANALYST", label: "Fundamental", icon: BarChart3, color: "text-blue-400", accent: "bg-blue-500" },
-  { key: "SENTIMENT_ANALYST", label: "Sentiment", icon: MessageCircle, color: "text-purple-400", accent: "bg-purple-500" },
-  { key: "NEWS_ANALYST", label: "News", icon: Newspaper, color: "text-amber-400", accent: "bg-amber-500" },
-  { key: "TECHNICAL_ANALYST", label: "Technical", icon: LineChart, color: "text-cyan-400", accent: "bg-cyan-500" },
-  { key: "BEAR_RESEARCHER", label: "Bear Case", icon: TrendingDown, color: "text-red-400", accent: "bg-red-500" },
-  { key: "BULL_RESEARCHER", label: "Bull Case", icon: TrendingUp, color: "text-green-400", accent: "bg-green-500" },
-  { key: "TRADER_DECISION", label: "Trader", icon: Crosshair, color: "text-cyan-400", accent: "bg-cyan-500" },
-  { key: "RISK_MANAGER", label: "Risk Mgr", icon: Shield, color: "text-orange-400", accent: "bg-orange-500" },
+  { key: "ICT_TRADER", label: "ICT / Smart Money", icon: Brain, color: "text-purple-400", accent: "bg-purple-500" },
+  { key: "ORDERFLOW_TRADER", label: "Order Flow", icon: BarChart3, color: "text-cyan-400", accent: "bg-cyan-500" },
+  { key: "SCALPER", label: "Scalper", icon: Zap, color: "text-green-400", accent: "bg-green-500" },
+  { key: "MACRO_TRADER", label: "Macro", icon: Globe, color: "text-amber-400", accent: "bg-amber-500" },
+  { key: "STRUCTURE_TRADER", label: "Structure", icon: LineChart, color: "text-blue-400", accent: "bg-blue-500" },
+  { key: "WHALE_TRACKER", label: "Whale Tracker", icon: Eye, color: "text-red-400", accent: "bg-red-500" },
+  { key: "HEAD_TRADER", label: "Head Trader", icon: Crown, color: "text-yellow-400", accent: "bg-yellow-500" },
+  { key: "BULL_ADVOCATE", label: "Bull Advocate", icon: TrendingUp, color: "text-lime-400", accent: "bg-lime-500" },
+  { key: "BEAR_ADVOCATE", label: "Bear Advocate", icon: TrendingDown, color: "text-rose-400", accent: "bg-rose-500" },
+  { key: "HEAD_TRADER_FINAL", label: "Final Decision", icon: Crown, color: "text-white", accent: "bg-yellow-600" },
+  { key: "RISK_MANAGER", label: "Risk Manager", icon: Shield, color: "text-orange-400", accent: "bg-orange-500" },
 ];
 
 function formatAgentOutput(text: string) {

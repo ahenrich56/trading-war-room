@@ -228,6 +228,37 @@ def _score_structure(ict_data, current_price):
                 signals.append("Price filling bearish FVG")
             break
 
+    # Liquidity grabs — strong reversal signals
+    for grab in ict_data.get("liquidity_grabs", []):
+        grab_type = grab.get("type", "")
+        if "bullish" in grab_type.lower():
+            score += 20
+            signals.append(f"Bullish liquidity grab at {grab.get('level', '?')}")
+        elif "bearish" in grab_type.lower():
+            score -= 20
+            signals.append(f"Bearish liquidity grab at {grab.get('level', '?')}")
+
+    # Swing Failure Patterns — high-probability reversal
+    for sfp in ict_data.get("swing_failure_patterns", []):
+        sfp_type = sfp.get("type", "")
+        if "bullish" in sfp_type.lower():
+            score += 15
+            signals.append(f"Bullish SFP at {sfp.get('level', '?')}")
+        elif "bearish" in sfp_type.lower():
+            score -= 15
+            signals.append(f"Bearish SFP at {sfp.get('level', '?')}")
+
+    # Judas swing — session open trap
+    judas = ict_data.get("judas_swing")
+    if judas:
+        judas_type = judas.get("type", "")
+        if "bullish" in judas_type.lower():
+            score += 10
+            signals.append("Bullish Judas swing detected")
+        elif "bearish" in judas_type.lower():
+            score -= 10
+            signals.append("Bearish Judas swing detected")
+
     return max(-100, min(100, score)), signals
 
 
