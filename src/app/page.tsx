@@ -322,12 +322,12 @@ export default function WarRoomDashboard() {
         {/* Nav Items */}
         <nav className={`flex flex-col gap-1 flex-1 ${sidebarExpanded ? "px-3" : "px-2"}`}>
           {([
-            { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", color: "cyan", onClick: () => setActiveView("main") },
-            { view: "watchlist" as const, icon: List, label: "Watchlist", color: "purple", onClick: () => setActiveView("watchlist") },
-            { view: "journal" as const, icon: BookOpen, label: "Journal", color: "pink", onClick: () => setActiveView("journal") },
-            { view: "consensus" as const, icon: Users, label: "Consensus", color: "amber", onClick: () => { setActiveView("consensus"); if (!consensusData) runConsensus(); } },
-            { view: "markets" as const, icon: BarChart3, label: "Markets", color: "emerald", onClick: () => setActiveView("markets") },
-          ]).map(({ view, icon: Icon, label, color, onClick }) => {
+            { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", activeBg: "bg-cyan-500/10", activeText: "text-cyan-400", activeBar: "bg-cyan-400", onClick: () => setActiveView("main") },
+            { view: "watchlist" as const, icon: List, label: "Watchlist", activeBg: "bg-purple-500/10", activeText: "text-purple-400", activeBar: "bg-purple-400", onClick: () => setActiveView("watchlist") },
+            { view: "journal" as const, icon: BookOpen, label: "Journal", activeBg: "bg-pink-500/10", activeText: "text-pink-400", activeBar: "bg-pink-400", onClick: () => setActiveView("journal") },
+            { view: "consensus" as const, icon: Users, label: "Consensus", activeBg: "bg-amber-500/10", activeText: "text-amber-400", activeBar: "bg-amber-400", onClick: () => { setActiveView("consensus"); if (!consensusData) runConsensus(); } },
+            { view: "markets" as const, icon: BarChart3, label: "Markets", activeBg: "bg-emerald-500/10", activeText: "text-emerald-400", activeBar: "bg-emerald-400", onClick: () => setActiveView("markets") },
+          ]).map(({ view, icon: Icon, label, activeBg, activeText, activeBar, onClick }) => {
             const isActive = activeView === view;
             return (
               <button
@@ -338,12 +338,12 @@ export default function WarRoomDashboard() {
                   sidebarExpanded ? "px-3 py-2.5" : "p-2.5 justify-center"
                 } ${
                   isActive
-                    ? `bg-${color}-500/10 text-${color}-400 shadow-[inset_0_0_20px_rgba(0,0,0,0.3)]`
+                    ? `${activeBg} ${activeText} shadow-[inset_0_0_20px_rgba(0,0,0,0.3)]`
                     : "text-slate-500 hover:text-slate-200 hover:bg-white/[0.04]"
                 }`}
               >
                 {isActive && (
-                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-${color}-400`} />
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full ${activeBar}`} />
                 )}
                 <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 ${isActive ? "" : "group-hover:scale-110"}`} />
                 {sidebarExpanded && (
@@ -661,17 +661,17 @@ export default function WarRoomDashboard() {
       {/* Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden border-t border-white/[0.06] flex items-center justify-around px-2 py-1.5 safe-area-inset-bottom" style={{ background: "rgba(8, 8, 18, 0.85)", backdropFilter: "blur(24px)" }}>
         {([
-          { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", color: "cyan" },
-          { view: "watchlist" as const, icon: List, label: "Watch", color: "purple" },
-          { view: "journal" as const, icon: BookOpen, label: "Journal", color: "pink" },
-          { view: "consensus" as const, icon: Users, label: "Vote", color: "amber" },
-          { view: "markets" as const, icon: BarChart3, label: "Markets", color: "emerald" },
-        ]).map(({ view, icon: Icon, label, color }) => (
+          { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", activeText: "text-cyan-400" },
+          { view: "watchlist" as const, icon: List, label: "Watch", activeText: "text-purple-400" },
+          { view: "journal" as const, icon: BookOpen, label: "Journal", activeText: "text-pink-400" },
+          { view: "consensus" as const, icon: Users, label: "Vote", activeText: "text-amber-400" },
+          { view: "markets" as const, icon: BarChart3, label: "Markets", activeText: "text-emerald-400" },
+        ]).map(({ view, icon: Icon, label, activeText }) => (
           <button
             key={view}
             onClick={() => { setActiveView(view); if (view === "consensus" && !consensusData) runConsensus(); }}
             className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
-              activeView === view ? `text-${color}-400` : "text-slate-600"
+              activeView === view ? activeText : "text-slate-600"
             }`}
           >
             <Icon className="h-5 w-5" />

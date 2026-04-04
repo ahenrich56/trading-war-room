@@ -9,17 +9,17 @@ interface AgentAccordionProps {
 }
 
 const AGENTS = [
-  { key: "ICT_TRADER", label: "ICT / Smart Money", icon: Brain, color: "text-purple-400", accent: "purple" },
-  { key: "ORDERFLOW_TRADER", label: "Order Flow", icon: BarChart3, color: "text-cyan-400", accent: "cyan" },
-  { key: "SCALPER", label: "Scalper", icon: Zap, color: "text-green-400", accent: "green" },
-  { key: "MACRO_TRADER", label: "Macro", icon: Globe, color: "text-amber-400", accent: "amber" },
-  { key: "STRUCTURE_TRADER", label: "Structure", icon: LineChart, color: "text-blue-400", accent: "blue" },
-  { key: "WHALE_TRACKER", label: "Whale Tracker", icon: Eye, color: "text-red-400", accent: "red" },
-  { key: "HEAD_TRADER", label: "Head Trader", icon: Crown, color: "text-yellow-400", accent: "yellow" },
-  { key: "BULL_ADVOCATE", label: "Bull Advocate", icon: TrendingUp, color: "text-lime-400", accent: "lime" },
-  { key: "BEAR_ADVOCATE", label: "Bear Advocate", icon: TrendingDown, color: "text-rose-400", accent: "rose" },
-  { key: "HEAD_TRADER_FINAL", label: "Final Decision", icon: Crown, color: "text-white", accent: "yellow" },
-  { key: "RISK_MANAGER", label: "Risk Manager", icon: Shield, color: "text-orange-400", accent: "orange" },
+  { key: "ICT_TRADER", label: "ICT / Smart Money", icon: Brain, color: "text-purple-400", accentBg: "bg-purple-500/15", checkBg: "bg-purple-500/15" },
+  { key: "ORDERFLOW_TRADER", label: "Order Flow", icon: BarChart3, color: "text-cyan-400", accentBg: "bg-cyan-500/15", checkBg: "bg-cyan-500/15" },
+  { key: "SCALPER", label: "Scalper", icon: Zap, color: "text-green-400", accentBg: "bg-green-500/15", checkBg: "bg-green-500/15" },
+  { key: "MACRO_TRADER", label: "Macro", icon: Globe, color: "text-amber-400", accentBg: "bg-amber-500/15", checkBg: "bg-amber-500/15" },
+  { key: "STRUCTURE_TRADER", label: "Structure", icon: LineChart, color: "text-blue-400", accentBg: "bg-blue-500/15", checkBg: "bg-blue-500/15" },
+  { key: "WHALE_TRACKER", label: "Whale Tracker", icon: Eye, color: "text-red-400", accentBg: "bg-red-500/15", checkBg: "bg-red-500/15" },
+  { key: "HEAD_TRADER", label: "Head Trader", icon: Crown, color: "text-yellow-400", accentBg: "bg-yellow-500/15", checkBg: "bg-yellow-500/15" },
+  { key: "BULL_ADVOCATE", label: "Bull Advocate", icon: TrendingUp, color: "text-lime-400", accentBg: "bg-lime-500/15", checkBg: "bg-lime-500/15" },
+  { key: "BEAR_ADVOCATE", label: "Bear Advocate", icon: TrendingDown, color: "text-rose-400", accentBg: "bg-rose-500/15", checkBg: "bg-rose-500/15" },
+  { key: "HEAD_TRADER_FINAL", label: "Final Decision", icon: Crown, color: "text-white", accentBg: "bg-yellow-500/15", checkBg: "bg-yellow-500/15" },
+  { key: "RISK_MANAGER", label: "Risk Manager", icon: Shield, color: "text-orange-400", accentBg: "bg-orange-500/15", checkBg: "bg-orange-500/15" },
 ];
 
 function formatAgentOutput(text: string) {
@@ -125,8 +125,8 @@ export function AgentAccordion({ agentData, currentStage }: AgentAccordionProps)
             >
               <div className="flex items-center gap-3">
                 <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                  isActive && !data ? `bg-${agent.accent}-500/15` :
-                  data ? `bg-${agent.accent}-500/10` :
+                  isActive && !data ? agent.accentBg :
+                  data ? agent.accentBg :
                   "bg-white/[0.03]"
                 }`}>
                   <Icon className={`h-3.5 w-3.5 ${data ? agent.color : isActive ? agent.color : "text-slate-600"}`} />
@@ -146,7 +146,7 @@ export function AgentAccordion({ agentData, currentStage }: AgentAccordionProps)
               </div>
               <div className="flex items-center gap-2">
                 {data && (
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center bg-${agent.accent}-500/15`}>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center ${agent.checkBg}`}>
                     <Check className={`h-3 w-3 ${agent.color}`} strokeWidth={3} />
                   </div>
                 )}
