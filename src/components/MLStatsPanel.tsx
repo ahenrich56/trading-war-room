@@ -39,10 +39,10 @@ export function MLStatsPanel() {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/8 p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
-        <div className="flex items-center gap-2 text-slate-500 text-xs">
+      <div className="rounded-xl border border-white/[0.06] p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
+        <div className="flex items-center gap-2.5 text-slate-500 text-xs">
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          Loading ML model...
+          <span className="font-medium">Loading ML model...</span>
         </div>
       </div>
     );
@@ -50,10 +50,12 @@ export function MLStatsPanel() {
 
   if (!stats || stats.status === "error") {
     return (
-      <div className="rounded-xl border border-red-500/20 p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
-        <div className="flex items-center gap-2 text-red-400 text-xs">
-          <Brain className="h-3.5 w-3.5" />
-          ML Model Error: {stats?.message || "Unknown"}
+      <div className="rounded-xl border border-red-500/15 p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
+        <div className="flex items-center gap-2.5 text-red-400 text-xs">
+          <div className="w-6 h-6 rounded-lg bg-red-500/10 flex items-center justify-center">
+            <Brain className="h-3.5 w-3.5" />
+          </div>
+          <span className="font-medium">ML Model Error: {stats?.message || "Unknown"}</span>
         </div>
       </div>
     );
@@ -61,10 +63,12 @@ export function MLStatsPanel() {
 
   if (stats.status === "not_trained") {
     return (
-      <div className="rounded-xl border border-amber-500/20 p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
-        <div className="flex items-center gap-2 text-amber-400 text-xs">
-          <Brain className="h-3.5 w-3.5" />
-          {stats.message}
+      <div className="rounded-xl border border-amber-500/15 p-4" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
+        <div className="flex items-center gap-2.5 text-amber-400 text-xs">
+          <div className="w-6 h-6 rounded-lg bg-amber-500/10 flex items-center justify-center">
+            <Brain className="h-3.5 w-3.5" />
+          </div>
+          <span className="font-medium">{stats.message}</span>
         </div>
       </div>
     );
@@ -74,33 +78,36 @@ export function MLStatsPanel() {
   const maxImportance = topFeatures.length > 0 ? topFeatures[0][1] : 1;
 
   return (
-    <div className="rounded-xl border border-white/8 p-4 space-y-3" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.06] p-4 space-y-3" style={{ background: "rgba(10, 10, 21, 0.5)", backdropFilter: "blur(12px)" }}>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-500/20 to-transparent" />
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Brain className="h-4 w-4 text-purple-400" />
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
+            <Brain className="h-4 w-4 text-purple-400" />
+          </div>
           <span className="text-xs font-bold text-white tracking-wide">ML SIGNAL FILTER</span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 font-semibold border border-green-500/20">
+        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-green-500/10 text-green-400 font-semibold border border-green-500/15">
           ACTIVE
         </span>
       </div>
 
       {/* Key Metrics */}
       <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg border border-white/5 p-2.5 text-center" style={{ background: "rgba(0,0,0,0.3)" }}>
-          <div className="text-[10px] text-slate-500 mb-1">SAMPLES</div>
-          <div className="text-sm font-bold text-white">{(stats.n_samples || 0).toLocaleString()}</div>
+        <div className="rounded-lg border border-white/[0.04] p-2.5 text-center bg-white/[0.02]">
+          <div className="text-[10px] text-slate-500 font-semibold mb-1">SAMPLES</div>
+          <div className="text-sm font-bold text-white tabular-nums">{(stats.n_samples || 0).toLocaleString()}</div>
         </div>
-        <div className="rounded-lg border border-white/5 p-2.5 text-center" style={{ background: "rgba(0,0,0,0.3)" }}>
-          <div className="text-[10px] text-slate-500 mb-1">WIN RATE</div>
-          <div className={`text-sm font-bold ${(stats.win_rate || 0) >= 33.3 ? "text-green-400" : "text-red-400"}`}>
+        <div className="rounded-lg border border-white/[0.04] p-2.5 text-center bg-white/[0.02]">
+          <div className="text-[10px] text-slate-500 font-semibold mb-1">WIN RATE</div>
+          <div className={`text-sm font-bold tabular-nums ${(stats.win_rate || 0) >= 33.3 ? "text-green-400" : "text-red-400"}`}>
             {stats.win_rate}%
           </div>
         </div>
-        <div className="rounded-lg border border-white/5 p-2.5 text-center" style={{ background: "rgba(0,0,0,0.3)" }}>
-          <div className="text-[10px] text-slate-500 mb-1">THRESHOLD</div>
-          <div className="text-sm font-bold text-cyan-400">{((stats.threshold || 0) * 100).toFixed(0)}%</div>
+        <div className="rounded-lg border border-white/[0.04] p-2.5 text-center bg-white/[0.02]">
+          <div className="text-[10px] text-slate-500 font-semibold mb-1">THRESHOLD</div>
+          <div className="text-sm font-bold text-cyan-400 tabular-nums">{((stats.threshold || 0) * 100).toFixed(0)}%</div>
         </div>
       </div>
 

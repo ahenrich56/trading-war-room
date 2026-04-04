@@ -19,7 +19,7 @@ import { MarketHeatmap } from "@/components/MarketHeatmap";
 import { AnalysisHUD } from "@/components/AnalysisHUD";
 import { MLStatsPanel } from "@/components/MLStatsPanel";
 import { GlassFilter } from "@/components/ui/liquid-glass";
-import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar } from "lucide-react";
+import { Activity, LayoutDashboard, Users, BookOpen, List, Settings, X, Menu, LayoutGrid, BarChart3, Radar, Crosshair, ChevronLeft, ChevronRight } from "lucide-react";
 
 const ALL_STAGES = [
   "ICT_TRADER",
@@ -40,6 +40,7 @@ export default function WarRoomDashboard() {
   const [ticker, setTicker] = useState("NQ1");
   const [timeframe, setTimeframe] = useState("5m");
   const [riskProfile, setRiskProfile] = useState("standard");
+  const [selectedModel, setSelectedModel] = useState("qwen-3-235b-a22b-instruct-2507");
 
   const [isRunning, setIsRunning] = useState(false);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export default function WarRoomDashboard() {
   const [isConsensusRunning, setIsConsensusRunning] = useState(false);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
@@ -228,7 +230,7 @@ export default function WarRoomDashboard() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, timeframe, riskProfile }),
+        body: JSON.stringify({ ticker, timeframe, riskProfile, model: selectedModel }),
         signal: controller.signal,
       });
 
@@ -299,47 +301,79 @@ export default function WarRoomDashboard() {
     <div className="flex h-screen text-slate-300 font-mono font-[family-name:var(--font-jetbrains-mono)] selection:bg-cyan-900 overflow-hidden" style={{ background: "linear-gradient(135deg, #05050A 0%, #0a0f1a 30%, #080510 60%, #05050A 100%)" }}>
       <GlassFilter />
       {/* Sidebar */}
-      <aside className="w-16 border-r border-white/8 hidden sm:flex flex-col items-center py-4 gap-6 z-50 flex-shrink-0" style={{ background: "rgba(10, 10, 21, 0.6)", backdropFilter: "blur(16px)" }}>
-        <Activity className="h-7 w-7 text-[#4A4A6A] mb-2 hover:text-cyan-400 transition-colors" />
-        <div className="flex flex-col gap-4 w-full items-center">
-          <button
-            onClick={() => setActiveView("main")}
-            title="Dashboard"
-            className={`p-2.5 rounded-xl transition-all ${activeView === "main" ? "bg-cyan-500/10 text-cyan-400" : "text-[#4A4A6A] hover:text-white"}`}
-          >
-            <LayoutDashboard className="h-5 w-5" />
-          </button>
-          <button
-            onClick={() => setActiveView("watchlist")}
-            title="Watchlist"
-            className={`p-2.5 rounded-xl transition-all ${activeView === "watchlist" ? "bg-purple-500/10 text-purple-400" : "text-[#4A4A6A] hover:text-white"}`}
-          >
-            <List className="h-5 w-5" />
-          </button>
-          <button
-            onClick={() => setActiveView("journal")}
-            title="Trade Journal"
-            className={`p-2.5 rounded-xl transition-all ${activeView === "journal" ? "bg-pink-500/10 text-pink-400" : "text-[#4A4A6A] hover:text-white"}`}
-          >
-            <BookOpen className="h-5 w-5" />
-          </button>
-          <button
-            onClick={() => { setActiveView("consensus"); if (!consensusData) runConsensus(); }}
-            title="Consensus"
-            className={`p-2.5 rounded-xl transition-all ${activeView === "consensus" ? "bg-amber-500/10 text-amber-400" : "text-[#4A4A6A] hover:text-white"}`}
-          >
-            <Users className="h-5 w-5" />
-          </button>
-          <button
-            onClick={() => setActiveView("markets")}
-            title="Markets"
-            className={`p-2.5 rounded-xl transition-all ${activeView === "markets" ? "bg-emerald-500/10 text-emerald-400" : "text-[#4A4A6A] hover:text-white"}`}
-          >
-            <BarChart3 className="h-5 w-5" />
-          </button>
+      <aside
+        className={`${sidebarExpanded ? "w-48" : "w-16"} border-r border-white/[0.06] hidden sm:flex flex-col py-4 z-50 flex-shrink-0 transition-all duration-300 ease-in-out`}
+        style={{ background: "rgba(8, 8, 18, 0.7)", backdropFilter: "blur(20px)" }}
+      >
+        {/* Logo / Brand */}
+        <div className={`flex items-center ${sidebarExpanded ? "px-4 gap-3" : "justify-center"} mb-6`}>
+          <div className="relative">
+            <Crosshair className="h-7 w-7 text-cyan-500" />
+            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          </div>
+          {sidebarExpanded && (
+            <div className="overflow-hidden">
+              <div className="text-xs font-extrabold text-white tracking-[0.2em] whitespace-nowrap">WAR ROOM</div>
+              <div className="text-[9px] text-slate-600 tracking-wider">TRADING SYSTEM</div>
+            </div>
+          )}
         </div>
-        <div className="mt-auto">
-          <Settings className="h-5 w-5 text-[#4A4A6A] hover:text-white cursor-pointer transition-colors" />
+
+        {/* Nav Items */}
+        <nav className={`flex flex-col gap-1 flex-1 ${sidebarExpanded ? "px-3" : "px-2"}`}>
+          {([
+            { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", color: "cyan", onClick: () => setActiveView("main") },
+            { view: "watchlist" as const, icon: List, label: "Watchlist", color: "purple", onClick: () => setActiveView("watchlist") },
+            { view: "journal" as const, icon: BookOpen, label: "Journal", color: "pink", onClick: () => setActiveView("journal") },
+            { view: "consensus" as const, icon: Users, label: "Consensus", color: "amber", onClick: () => { setActiveView("consensus"); if (!consensusData) runConsensus(); } },
+            { view: "markets" as const, icon: BarChart3, label: "Markets", color: "emerald", onClick: () => setActiveView("markets") },
+          ]).map(({ view, icon: Icon, label, color, onClick }) => {
+            const isActive = activeView === view;
+            return (
+              <button
+                key={view}
+                onClick={onClick}
+                title={!sidebarExpanded ? label : undefined}
+                className={`relative flex items-center gap-3 rounded-xl transition-all duration-200 group ${
+                  sidebarExpanded ? "px-3 py-2.5" : "p-2.5 justify-center"
+                } ${
+                  isActive
+                    ? `bg-${color}-500/10 text-${color}-400 shadow-[inset_0_0_20px_rgba(0,0,0,0.3)]`
+                    : "text-slate-500 hover:text-slate-200 hover:bg-white/[0.04]"
+                }`}
+              >
+                {isActive && (
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-${color}-400`} />
+                )}
+                <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-transform duration-200 ${isActive ? "" : "group-hover:scale-110"}`} />
+                {sidebarExpanded && (
+                  <span className={`text-xs font-semibold tracking-wide whitespace-nowrap ${isActive ? "" : "text-slate-400 group-hover:text-slate-200"}`}>
+                    {label}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Bottom actions */}
+        <div className={`flex flex-col gap-2 ${sidebarExpanded ? "px-3" : "px-2"} mt-4`}>
+          <div className="h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent mb-1" />
+          <button
+            title="Settings"
+            className={`flex items-center gap-3 rounded-xl transition-all text-slate-500 hover:text-slate-200 hover:bg-white/[0.04] ${sidebarExpanded ? "px-3 py-2.5" : "p-2.5 justify-center"}`}
+          >
+            <Settings className="h-[18px] w-[18px]" />
+            {sidebarExpanded && <span className="text-xs font-semibold tracking-wide text-slate-400">Settings</span>}
+          </button>
+          <button
+            onClick={() => setSidebarExpanded(e => !e)}
+            className={`flex items-center gap-3 rounded-xl transition-all text-slate-600 hover:text-slate-300 hover:bg-white/[0.04] ${sidebarExpanded ? "px-3 py-2" : "p-2.5 justify-center"}`}
+            title={sidebarExpanded ? "Collapse" : "Expand"}
+          >
+            {sidebarExpanded ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {sidebarExpanded && <span className="text-[10px] text-slate-500">Collapse</span>}
+          </button>
         </div>
       </aside>
 
@@ -348,90 +382,125 @@ export default function WarRoomDashboard() {
         <div className="absolute inset-0 bg-[url('/dots.svg')] bg-repeat opacity-[0.03] pointer-events-none" />
 
         {/* Header */}
-        <header className="shrink-0 sticky top-0 z-40 border-b border-white/8 px-4 py-2.5" style={{ background: "rgba(5, 5, 10, 0.6)", backdropFilter: "blur(16px)" }}>
+        <header className="shrink-0 sticky top-0 z-40 border-b border-white/[0.06] px-4 py-2" style={{ background: "rgba(5, 5, 10, 0.75)", backdropFilter: "blur(20px)" }}>
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-extrabold text-white tracking-widest uppercase hidden sm:block">WAR ROOM</h1>
-              <div
-                className={`h-2 w-2 rounded-full flex-shrink-0 ${
-                  backendStatus === "ok" ? "bg-cyan-500 animate-pulse" :
-                  backendStatus === "checking" ? "bg-amber-500 animate-pulse" :
-                  "bg-red-500"
-                }`}
-                title={backendStatus === "ok" ? "Backend connected" : backendStatus === "checking" ? "Checking..." : "Backend offline"}
-              />
-              {backendStatus === "error" && (
-                <span className="text-[10px] text-red-500 font-bold hidden sm:inline">OFFLINE</span>
-              )}
+            {/* Left: Status */}
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <div
+                    className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                      backendStatus === "ok" ? "bg-cyan-500" :
+                      backendStatus === "checking" ? "bg-amber-500" :
+                      "bg-red-500"
+                    }`}
+                  />
+                  {backendStatus === "ok" && (
+                    <div className="absolute inset-0 h-2 w-2 rounded-full bg-cyan-500 animate-ping opacity-30" />
+                  )}
+                </div>
+                <span className={`text-[10px] font-semibold tracking-wider hidden sm:inline ${
+                  backendStatus === "ok" ? "text-cyan-500/70" :
+                  backendStatus === "checking" ? "text-amber-500/70" :
+                  "text-red-500"
+                }`}>
+                  {backendStatus === "ok" ? "LIVE" : backendStatus === "checking" ? "..." : "OFFLINE"}
+                </span>
+              </div>
             </div>
 
+            {/* Mobile menu toggle */}
             <button
-              className="sm:hidden text-[#4A4A6A] hover:text-white p-1"
+              className="sm:hidden text-slate-500 hover:text-white p-1.5 rounded-lg hover:bg-white/5"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             >
-              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
 
-            <div className={`${isMobileMenuOpen ? "flex" : "hidden"} sm:flex flex-col sm:flex-row gap-2 items-stretch sm:items-center absolute sm:relative top-full left-0 right-0 sm:top-auto bg-[#05050A] sm:bg-transparent p-3 sm:p-0 border-b sm:border-0 border-white/5 z-50`}>
-              <Input
-                value={ticker}
-                onChange={e => setTicker(e.target.value.toUpperCase())}
-                placeholder="TICKER"
-                className="w-20 bg-black/50 border-white/20 uppercase text-cyan-400 font-bold text-xs h-8"
-              />
-              <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
-                <SelectTrigger className="w-16 bg-black/50 border-white/20 text-xs h-8">
-                  <SelectValue placeholder="TF" />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-white/20 text-white">
-                  <SelectItem value="1m">1m</SelectItem>
-                  <SelectItem value="5m">5m</SelectItem>
-                  <SelectItem value="15m">15m</SelectItem>
-                  <SelectItem value="1h">1h</SelectItem>
-                </SelectContent>
-              </Select>
-              <button
-                onClick={() => setMultiChart(m => !m)}
-                className={`h-8 w-8 flex items-center justify-center rounded border transition-all ${multiChart ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-400" : "border-white/20 bg-black/50 text-slate-500 hover:text-slate-300"}`}
-                title="Toggle multi-timeframe view"
-              >
-                <LayoutGrid className="h-3.5 w-3.5" />
-              </button>
-              <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
-                <SelectTrigger className="w-24 bg-black/50 border-white/20 text-xs h-8">
-                  <SelectValue placeholder="Risk" />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-white/20 text-white">
-                  <SelectItem value="conservative">Conservative</SelectItem>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="aggressive">Aggressive</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                onClick={runAnalysis}
-                disabled={isRunning}
-                className={`relative overflow-hidden text-white font-extrabold text-xs h-8 transition-all border ${
-                  isRunning
-                    ? "bg-cyan-900/30 border-cyan-400/40 shadow-[0_0_20px_rgba(6,182,212,0.5)] cursor-wait"
-                    : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-[0_0_15px_rgba(6,182,212,0.4)] hover:shadow-[0_0_25px_rgba(6,182,212,0.6)] border-cyan-400/30"
-                }`}
-              >
-                {isRunning && (
-                  <span
-                    className="absolute inset-[-2px] rounded-md opacity-80"
-                    style={{
-                      background: "conic-gradient(from 0deg, transparent 60%, #06b6d4 100%)",
-                      animation: "scan-sweep 1.5s linear infinite",
-                    }}
-                  />
-                )}
-                {isRunning && <span className="absolute inset-[2px] rounded bg-slate-950/90" />}
-                <span className="relative z-10 flex items-center gap-2">
-                  {isRunning && <Radar className="h-3 w-3 animate-spin [animation-duration:2s]" />}
-                  {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
-                </span>
-              </Button>
-              <AlertBell onTickerSelect={(t) => { setTicker(t); setActiveView("main"); }} />
+            {/* Controls */}
+            <div className={`${isMobileMenuOpen ? "flex" : "hidden"} sm:flex flex-col sm:flex-row gap-2 items-stretch sm:items-center absolute sm:relative top-full left-0 right-0 sm:top-auto p-3 sm:p-0 z-50 ${isMobileMenuOpen ? "bg-[#08081280] backdrop-blur-xl border-b border-white/[0.06]" : ""}`}>
+              {/* Instrument group */}
+              <div className="flex items-center gap-1.5 sm:border-r sm:border-white/[0.06] sm:pr-3">
+                <Input
+                  value={ticker}
+                  onChange={e => setTicker(e.target.value.toUpperCase())}
+                  placeholder="TICKER"
+                  className="w-20 bg-white/[0.04] border-white/[0.08] uppercase text-cyan-400 font-bold text-xs h-8 focus:border-cyan-500/40 focus:ring-cyan-500/20 placeholder:text-slate-600"
+                />
+                <Select value={timeframe} onValueChange={(v) => v && setTimeframe(v)}>
+                  <SelectTrigger className="w-16 bg-white/[0.04] border-white/[0.08] text-xs h-8 text-slate-300">
+                    <SelectValue placeholder="TF" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0c0c1a] border-white/[0.1] text-white">
+                    <SelectItem value="1m">1m</SelectItem>
+                    <SelectItem value="5m">5m</SelectItem>
+                    <SelectItem value="15m">15m</SelectItem>
+                    <SelectItem value="1h">1h</SelectItem>
+                  </SelectContent>
+                </Select>
+                <button
+                  onClick={() => setMultiChart(m => !m)}
+                  className={`h-8 w-8 flex items-center justify-center rounded-lg border transition-all ${multiChart ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400" : "border-white/[0.08] bg-white/[0.04] text-slate-500 hover:text-slate-300 hover:border-white/[0.15]"}`}
+                  title="Toggle multi-timeframe view"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Config group */}
+              <div className="flex items-center gap-1.5 sm:border-r sm:border-white/[0.06] sm:pr-3">
+                <Select value={riskProfile} onValueChange={(v) => v && setRiskProfile(v)}>
+                  <SelectTrigger className="w-24 bg-white/[0.04] border-white/[0.08] text-xs h-8 text-slate-300">
+                    <SelectValue placeholder="Risk" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0c0c1a] border-white/[0.1] text-white">
+                    <SelectItem value="conservative">Conservative</SelectItem>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="aggressive">Aggressive</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={selectedModel} onValueChange={(v) => v && setSelectedModel(v)}>
+                  <SelectTrigger className="w-36 bg-white/[0.04] border-white/[0.08] text-xs h-8 text-slate-300">
+                    <SelectValue placeholder="Model" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0c0c1a] border-white/[0.1] text-white">
+                    <SelectItem value="qwen-3-235b-a22b-instruct-2507">QWen 3 235B</SelectItem>
+                    <SelectItem value="llama-3.3-70b-versatile">Llama 3.3 70B</SelectItem>
+                    <SelectItem value="openai/gpt-oss-120b">GPT-OSS 120B</SelectItem>
+                    <SelectItem value="openclaude">OpenClaude (Agent)</SelectItem>
+                    <SelectItem value="nvidia/nemotron-3-super-120b-a12b:free">Nemotron 120B</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Action group */}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={runAnalysis}
+                  disabled={isRunning}
+                  className={`relative overflow-hidden text-white font-extrabold text-xs h-8 px-5 transition-all border rounded-lg ${
+                    isRunning
+                      ? "bg-cyan-900/30 border-cyan-400/40 shadow-[0_0_20px_rgba(6,182,212,0.4)] cursor-wait"
+                      : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-[0_0_12px_rgba(6,182,212,0.3)] hover:shadow-[0_0_24px_rgba(6,182,212,0.5)] border-cyan-500/30"
+                  }`}
+                >
+                  {isRunning && (
+                    <span
+                      className="absolute inset-[-2px] rounded-lg opacity-75"
+                      style={{
+                        background: "conic-gradient(from 0deg, transparent 60%, #06b6d4 100%)",
+                        animation: "scan-sweep 1.5s linear infinite",
+                      }}
+                    />
+                  )}
+                  {isRunning && <span className="absolute inset-[2px] rounded-md bg-[#05050A]/90" />}
+                  <span className="relative z-10 flex items-center gap-2">
+                    {isRunning && <Radar className="h-3.5 w-3.5 animate-spin [animation-duration:2s]" />}
+                    {isRunning ? "ANALYZING..." : "RUN ANALYSIS"}
+                  </span>
+                </Button>
+                <AlertBell onTickerSelect={(t) => { setTicker(t); setActiveView("main"); }} />
+              </div>
             </div>
           </div>
         </header>
@@ -458,11 +527,21 @@ export default function WarRoomDashboard() {
           {/* ═══ MAIN VIEW: Chart + Signal ═══ */}
           {activeView === "main" && (
             <>
-              {/* Chart title */}
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-semibold text-slate-400 tracking-wide">{ticker}</span>
-                <span className="text-[10px] text-slate-600">/</span>
-                <span className="text-xs text-slate-500">{timeframe}</span>
+              {/* Chart header */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-white tracking-wide">{ticker}</span>
+                    <span className="text-slate-600">/</span>
+                    <span className="text-xs text-slate-500 font-medium">{timeframe}</span>
+                  </div>
+                  {isRunning && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+                      <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span className="text-[10px] text-cyan-400 font-semibold">LIVE</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center justify-between mb-2">
@@ -496,10 +575,10 @@ export default function WarRoomDashboard() {
 
               {/* Section divider */}
               {signal && (
-                <div className="flex items-center gap-3 py-1">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                  <span className="text-[9px] text-slate-600 font-medium tracking-wider">SIGNAL</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                <div className="flex items-center gap-3 py-2">
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
+                  <span className="text-[9px] text-slate-600 font-semibold tracking-[0.2em]">SIGNAL</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
                 </div>
               )}
 
@@ -510,10 +589,10 @@ export default function WarRoomDashboard() {
 
               {/* Section divider */}
               {Object.keys(agentData).length > 0 && (
-                <div className="flex items-center gap-3 py-1">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                  <span className="text-[9px] text-slate-600 font-medium tracking-wider">AGENTS</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                <div className="flex items-center gap-3 py-2">
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
+                  <span className="text-[9px] text-slate-600 font-semibold tracking-[0.2em]">AGENTS</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
                 </div>
               )}
             </>
@@ -560,12 +639,18 @@ export default function WarRoomDashboard() {
             {toasts.map(toast => (
               <div
                 key={toast.id}
-                className={`px-4 py-3 rounded-lg border backdrop-blur-md shadow-2xl text-xs font-bold animate-in slide-in-from-right duration-300 ${
-                  toast.type === "success" ? "bg-green-500/20 border-green-500/40 text-green-400" :
-                  toast.type === "error" ? "bg-red-500/20 border-red-500/40 text-red-400" :
-                  "bg-cyan-500/20 border-cyan-500/40 text-cyan-400"
+                className={`relative overflow-hidden px-4 py-3 rounded-xl border shadow-2xl text-xs font-semibold animate-in slide-in-from-right duration-300 ${
+                  toast.type === "success" ? "bg-green-500/10 border-green-500/20 text-green-400" :
+                  toast.type === "error" ? "bg-red-500/10 border-red-500/20 text-red-400" :
+                  "bg-cyan-500/10 border-cyan-500/20 text-cyan-400"
                 }`}
+                style={{ backdropFilter: "blur(16px)" }}
               >
+                <div className={`absolute inset-x-0 top-0 h-px ${
+                  toast.type === "success" ? "bg-gradient-to-r from-transparent via-green-500/40 to-transparent" :
+                  toast.type === "error" ? "bg-gradient-to-r from-transparent via-red-500/40 to-transparent" :
+                  "bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent"
+                }`} />
                 {toast.message}
               </div>
             ))}
@@ -574,22 +659,23 @@ export default function WarRoomDashboard() {
       </div>
 
       {/* Mobile Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden border-t border-white/8 flex items-center justify-around px-2 py-2" style={{ background: "rgba(10, 10, 21, 0.7)", backdropFilter: "blur(20px)" }}>
-        {[
-          { view: "main", icon: LayoutDashboard, color: "cyan" },
-          { view: "watchlist", icon: List, color: "purple" },
-          { view: "journal", icon: BookOpen, color: "pink" },
-          { view: "consensus", icon: Users, color: "amber" },
-          { view: "markets", icon: BarChart3, color: "emerald" },
-        ].map(({ view, icon: Icon, color }) => (
+      <nav className="fixed bottom-0 left-0 right-0 z-50 sm:hidden border-t border-white/[0.06] flex items-center justify-around px-2 py-1.5 safe-area-inset-bottom" style={{ background: "rgba(8, 8, 18, 0.85)", backdropFilter: "blur(24px)" }}>
+        {([
+          { view: "main" as const, icon: LayoutDashboard, label: "Dashboard", color: "cyan" },
+          { view: "watchlist" as const, icon: List, label: "Watch", color: "purple" },
+          { view: "journal" as const, icon: BookOpen, label: "Journal", color: "pink" },
+          { view: "consensus" as const, icon: Users, label: "Vote", color: "amber" },
+          { view: "markets" as const, icon: BarChart3, label: "Markets", color: "emerald" },
+        ]).map(({ view, icon: Icon, label, color }) => (
           <button
             key={view}
-            onClick={() => { setActiveView(view as any); if (view === "consensus" && !consensusData) runConsensus(); }}
-            className={`p-2.5 rounded-xl transition-all ${
-              activeView === view ? `bg-${color}-500/10 text-${color}-400` : "text-[#4A4A6A]"
+            onClick={() => { setActiveView(view); if (view === "consensus" && !consensusData) runConsensus(); }}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
+              activeView === view ? `text-${color}-400` : "text-slate-600"
             }`}
           >
             <Icon className="h-5 w-5" />
+            <span className="text-[9px] font-medium">{label}</span>
           </button>
         ))}
       </nav>
